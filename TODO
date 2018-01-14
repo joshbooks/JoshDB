@@ -1,4 +1,4 @@
-0.
+0. Done
 get this checked into git
 1.
 get zookeeper server starting at all
@@ -7,16 +7,18 @@ Choose an odd zookeeper server port between (101,200]
 such that both that port and the port 1 greater than it
 are available
 3.
-Get the node server working at all
+Get that local server into the current list of zookeeper servers
+the client can connect to
 4.
+Get the node server working at all
+5.
 get the node server to start on the port one greater than the
 zookeeper service (this may require shutting down the zookeeper
 service and repeating the step in which it selects an available
 port such that the one above it is also available)
-5.
-get the async store succeeded callback to trigger only once the
-message has actually been stored to nonvolatile memory. Sqlite
-has laid some excellent groundwork for this, following their example
-does not seem like seem like a crazy idea.
 6.
-
+get the async store succeeded callback to trigger only once the
+message has actually been stored to nonvolatile memory. SQLite
+has laid some excellent groundwork for this, following their example
+does not seem like a crazy idea.
+7.
