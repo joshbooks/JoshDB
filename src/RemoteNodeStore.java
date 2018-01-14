@@ -1,7 +1,6 @@
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.FileNotFoundException;
-import java.io.IOException;
+import org.cliffc.high_scale_lib.NonBlockingHashSet;
+
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -10,7 +9,7 @@ import java.util.stream.Stream;
 
 public class RemoteNodeStore
 {
-    private List<RemoteNode> cachedNodes = null;
+    private Set<RemoteNode> cachedNodes = new NonBlockingHashSet<>();
     private final Object cachedNodesLock = new Object();
     private final Path remoteNodeStoreFile;
 
@@ -24,7 +23,7 @@ public class RemoteNodeStore
         this(RemoteNodeStoreSettings.storeFileDirectory.resolve(storeFileName));
     }
 
-    List<RemoteNode> nodesFromLineStream(Stream<String> lineStream)
+    Stream<RemoteNode> nodeStreamFromLineStream(Stream<String> lineStream)
     {
         return lineStream.map(line -> {
         String[] triplet = line.split(":");
@@ -36,11 +35,33 @@ public class RemoteNodeStore
         return new RemoteNode
                 (
                         triplet[0],
-                        new Integer(triplet[1]),
+                        Integer.decode(triplet[1]),
                         UUID.fromString(triplet[2])
                 );
-    }).filter(Objects::nonNull).collect(Collectors.toList());
+        }).filter(Objects::nonNull);
     }
+
+
+    public Stream<RemoteNode> nodeStreamFromNodeStore(Path storeFile) throws IOException
+    {
+        try (BufferedReader nodeReader = Files.newBufferedReader(storeFile))
+        {
+            return nodeStreamFromLineStream(nodeReader.lines());
+        }
+    }
+
+
+    public void updateCacheFromNodeStream(Stream<RemoteNode> nodeStream)
+    {
+        cachedNodes.addAll(nodeStream.collect(Collectors.toList()));
+    }
+
+    public void updateCacheFromNodeStore() throws IOException
+    {
+        updateCacheFromNodeStream(nodeStreamFromNodeStore(remoteNodeStoreFile));
+    }
+
+
 
     public RemoteNodeStore(Path storeFile) throws IOException
     {
@@ -48,11 +69,7 @@ public class RemoteNodeStore
         //so at this point we have the path to the remote nodes setting file
         //if it contains at least one node we succeed otherwise we throw an
         //IOException
-        BufferedReader nodeReader = Files.newBufferedReader(storeFile);
-
-        cachedNodes = nodesFromLineStream(nodeReader.lines());
-
-        nodeReader.close();
+        updateCacheFromNodeStore();
 
         if (cachedNodes.size() == 0)
         {
@@ -128,12 +145,15 @@ public class RemoteNodeStore
 
     public void updateNodes(String serializedNodes) throws IOException
     {
-        cachedNodes =
-                nodesFromLineStream
+        // todo this function is a little gnarly, might want to
+        // refactor this and related functions into a StoreIO static
+        // util class and make it all nice and streamy and modular
+        cachedNodes.addAll(
+                nodeStreamFromLineStream
                 (
                     new ArrayList<>(Arrays.asList(serializedNodes.split("\n")))
                             .stream()
-                );
+                ).collect(Collectors.toList()));
         flushNodesToDisk();
     }
 }
