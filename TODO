@@ -2,6 +2,17 @@
 get this checked into git
 1.
 get zookeeper server starting at all
+    a.
+    set the necessary properties for the zookeeper server
+        i.
+        figure out what the necessary properties are and list them here:
+            dataDir (string path to datadir, myid file should be datadir/myid)
+            (I think in the distant future the dataDir and dataLogDir could and
+            should be completely in memory)
+            clientPort
+            server.something property required for every server (there must be more than 1)
+        ii.
+        set them
 2.
 Choose an odd zookeeper server port between (101,200]
 such that both that port and the port 1 greater than it

@@ -10,7 +10,6 @@ import java.util.stream.Stream;
 public class RemoteNodeStore
 {
     private Set<RemoteNode> cachedNodes = new NonBlockingHashSet<>();
-    private final Object cachedNodesLock = new Object();
     private final Path remoteNodeStoreFile;
 
     public RemoteNodeStore() throws IOException
@@ -23,9 +22,8 @@ public class RemoteNodeStore
         this(RemoteNodeStoreSettings.storeFileDirectory.resolve(storeFileName));
     }
 
-    Stream<RemoteNode> nodeStreamFromLineStream(Stream<String> lineStream)
+    public static RemoteNode nodeFromString(String line)
     {
-        return lineStream.map(line -> {
         String[] triplet = line.split(":");
         if (triplet.length != 3)
         {
@@ -33,23 +31,28 @@ public class RemoteNodeStore
         }
 
         return new RemoteNode
-                (
-                        triplet[0],
-                        Integer.decode(triplet[1]),
-                        UUID.fromString(triplet[2])
-                );
-        }).filter(Objects::nonNull);
+        (
+            triplet[0],
+            Integer.decode(triplet[1]),
+            UUID.fromString(triplet[2])
+        );
     }
 
+    public static Stream<RemoteNode> nodeStreamFromLineStream(Stream<String> lineStream)
+    {
+        return lineStream
+                .map(RemoteNodeStore::nodeFromString)
+                .filter(Objects::nonNull);
+    }
 
-    public Stream<RemoteNode> nodeStreamFromNodeStore(Path storeFile) throws IOException
+    public static Stream<RemoteNode> nodeStreamFromNodeStore(Path storeFile)
+    throws IOException
     {
         try (BufferedReader nodeReader = Files.newBufferedReader(storeFile))
         {
             return nodeStreamFromLineStream(nodeReader.lines());
         }
     }
-
 
     public void updateCacheFromNodeStream(Stream<RemoteNode> nodeStream)
     {
@@ -60,8 +63,6 @@ public class RemoteNodeStore
     {
         updateCacheFromNodeStream(nodeStreamFromNodeStore(remoteNodeStoreFile));
     }
-
-
 
     public RemoteNodeStore(Path storeFile) throws IOException
     {
@@ -82,19 +83,6 @@ public class RemoteNodeStore
 
     public List<RemoteNode> getNodes()
     {
-        if (cachedNodes == null)
-        {
-            try
-            {
-                cachedNodesLock.wait();
-            }
-            catch (InterruptedException e)
-            {
-                //todo log something
-                return new ArrayList<>();
-            }
-        }
-
         return new ArrayList<>(cachedNodes);
     }
 
@@ -140,20 +128,26 @@ public class RemoteNodeStore
 
     private String uniqueTemporaryName()
     {
-        return remoteNodeStoreFile.getFileName()+UUID.randomUUID().toString();
+        return remoteNodeStoreFile.getFileName() + UUID.randomUUID().toString();
+    }
+
+    public static Stream<String> lineStreamFromString(String lines)
+    {
+        return Arrays.stream(lines.split("\n"));
     }
 
     public void updateNodes(String serializedNodes) throws IOException
     {
-        // todo this function is a little gnarly, might want to
-        // refactor this and related functions into a StoreIO static
-        // util class and make it all nice and streamy and modular
-        cachedNodes.addAll(
-                nodeStreamFromLineStream
-                (
-                    new ArrayList<>(Arrays.asList(serializedNodes.split("\n")))
-                            .stream()
-                ).collect(Collectors.toList()));
+        updateCacheFromNodeStream
+        (
+            nodeStreamFromLineStream(lineStreamFromString(serializedNodes))
+        );
+
         flushNodesToDisk();
+    }
+
+    public Stream<RemoteNode> getNodesStream()
+    {
+        return cachedNodes.stream();
     }
 }

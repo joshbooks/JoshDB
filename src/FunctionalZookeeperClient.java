@@ -112,8 +112,15 @@ public class FunctionalZookeeperClient implements Watcher
             //it's probably fine
         }
 
+        int clientPort = findUsableZookeeperPort();
 
-        // todo then we set the properties, starting with the
+        // todo then we set the properties
+        properties.setProperty("dataDir", localDataDir.toAbsolutePath().toString());
+        properties.setProperty("clientPort", Integer.toString(clientPort));
+
+        //todo figure out what to map this to, do it, then collect it in properties
+        remotes.getNodesStream().map(remoteNode -> {return null;});
+
 
 
 
@@ -130,6 +137,11 @@ public class FunctionalZookeeperClient implements Watcher
                 // todo well fuck, what do here?
             }
         }).start();
+    }
+
+    private int findUsableZookeeperPort()
+    {
+        return 100;
     }
 
     public void startZookeeperClient(List<HostPortPair> nodes) throws IOException
