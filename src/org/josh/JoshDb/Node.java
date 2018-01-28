@@ -295,8 +295,7 @@ public class Node implements Closeable {
                 //todo persist and ack
 
             default:
-                //todo this should throw like 15 exceptions
-                return null;
+                throw new IllegalArgumentException(request.type + " is not a recognized type");
         }
     }
 
@@ -344,7 +343,7 @@ public class Node implements Closeable {
 
     //todo so I think maybe the reason this needs to be a separate function
     //is that intents need to be a separate message type to receipt messages
-    //tell people what ypu're about to tell the person who
+    //tell people what you're about to tell the person who
     // sent the message that resulted in this message
     void reportIntent(Message responseToBe)
     {
@@ -354,7 +353,7 @@ public class Node implements Closeable {
 
 
 }
-//each node shall maintain a org.josh.JoshDb.Node object for other Nodes as well, with as up
+//each node shall maintain a org.josh.JoshDb.RemoteNode object for other Nodes, with as up
 //to date a replica of that org.josh.JoshDb.Node's state as they can figure out from the messages
 //they overhear, that way they know who to ask when it comes time to satisfy a request
 
