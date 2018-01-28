@@ -1,5 +1,7 @@
+package org.josh.JoshDb;
+
 /**
- * Convenience class with a bunch of static methods for Message
+ * Convenience class with a bunch of static methods for org.josh.JoshDb.Message
  */
 public class Messages {
 
@@ -54,20 +56,14 @@ public class Messages {
 
         ack.type = MessageType.ACK;
         ack.receiptChain = msg.receiptChain;
-        Receipt receipt = createReceipt(thisNode);
-        ack.receiptChain.add(receipt);
+        ack.receiptChain =
+                Receipt.nonModifyingAppend
+                (
+                    msg.receiptChain,
+                    new Receipt(thisNode)
+                );
         ack.data = msg.messageId;
 
         return ack;
-    }
-
-    private static Receipt createReceipt(Node thisNode)
-    {
-        Receipt receipt = new Receipt();
-
-        receipt.receivedAt = System.currentTimeMillis();
-        receipt.receivedBy = thisNode.getNodeId();
-
-        return receipt;
     }
 }

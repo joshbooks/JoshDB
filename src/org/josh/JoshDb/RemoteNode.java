@@ -1,3 +1,5 @@
+package org.josh.JoshDb;
+
 import java.util.HashMap;
 import java.util.UUID;
 
@@ -12,13 +14,15 @@ public class RemoteNode {
 
     public RemoteNode(String host, int port, UUID id)
     {
-        this.id = id;
+        this.host = host;
+        this.port = port;
+        this.id = UUID.fromString(id.toString());
     }
 
     public void sendMessage(Message msg)
     {
-        //todo this is not so great. The RemoteNode should store the type of
-        //connection this Node has to the RemoteNode and call the appropriate
+        //todo this is not so great. The org.josh.JoshDb.RemoteNode should store the type of
+        //connection this org.josh.JoshDb.Node has to the org.josh.JoshDb.RemoteNode and call the appropriate
         // function to send the message over that type of connection. but for
         // now since we're going to be testing this all on one achine, we'll
         // just assume that all nodes are connected by being run on the same JVM

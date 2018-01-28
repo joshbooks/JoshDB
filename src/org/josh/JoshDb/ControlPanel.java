@@ -1,3 +1,5 @@
+package org.josh.JoshDb;
+
 /**
  * A bunch of hacky switches that control everything
  */

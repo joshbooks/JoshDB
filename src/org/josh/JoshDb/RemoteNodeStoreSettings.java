@@ -1,3 +1,5 @@
+package org.josh.JoshDb;
+
 import java.nio.file.Path;
 import java.nio.file.Paths;
 

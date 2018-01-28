@@ -1,11 +1,17 @@
+package org.josh.JoshDb;
+
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 
+@Deprecated
 public class LogFile{
 
     private final Path logFileLocus;
 
 
+    //todo, I think this has been superseded by MessagePersistor,
+    //make sure MessagePersistor has all the logic it needs from
+    // this class then get rid of this class
     public LogFile(Path logFileLocus, int numThreads)
     {
         this.logFileLocus = logFileLocus;

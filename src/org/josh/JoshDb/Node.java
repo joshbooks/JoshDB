@@ -1,8 +1,14 @@
+package org.josh.JoshDb;
+
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
+import org.apache.zookeeper.server.quorum.QuorumPeerMain;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
@@ -13,7 +19,9 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class Node {
+public class Node implements Closeable {
+
+
 
     // so this guy here is the distributed value thingy,
     // for now there is exactly one of them, and each node is
@@ -24,6 +32,8 @@ public class Node {
     AtomicLong thisNodeValue;
 
     static final Path logFiles = Paths.get("./logs");
+
+    private static final Logger logger = LoggerFactory.getLogger(Node.class);
 
     // what kind of info? I don't know, but we're going to need to store some
     // conf stuff/metadata/state, but until we know what that is going to be
@@ -54,8 +64,6 @@ public class Node {
 
     private final MessagePersistor logFile;
 
-    private ZooKeeper zk = null;
-
     private FunctionalZookeeperClient fz;
 
 
@@ -66,7 +74,7 @@ public class Node {
     final SecureRandom random;
 
     // todo this is probably going to go away, just use
-    // FunctionalZookeeperClient/RemoteNodeStore
+    // org.josh.JoshDb.FunctionalZookeeperClient/org.josh.JoshDb.RemoteNodeStore
     TreeSet<RemoteNode> nodesOfWhichIAmAware = new TreeSet<>();
 
     HashMap<UUID, RemoteNode> nodesByUuid;
@@ -75,24 +83,30 @@ public class Node {
             throws IOException,
             NoSuchAlgorithmException,
             KeeperException,
-            InterruptedException
+            InterruptedException,
+            QuorumPeerConfig.ConfigException
     {
-        this(UUID.randomUUID());
+        //this(UUID.randomUUID());
+        //when starting in standalone mode zookeeper expects a server id of 0
+        //todo that's fucked, I don't like it, make it better
+        this(new UUID(123, 0));
     }
 
     public Node(UUID uuid)
             throws IOException,
             NoSuchAlgorithmException,
             KeeperException,
-            InterruptedException
+            InterruptedException,
+            QuorumPeerConfig.ConfigException
     {
         this.nodeId = uuid;
 
         logFile = new MessagePersistor(logFiles.resolve(this.nodeId.toString()));
+        this.fz = new FunctionalZookeeperClient(this.nodeId);
 
         //todo decide how to do the thing
         random = new SecureRandom();
-        random.setSeed(random.generateSeed(128));
+        random.setSeed(random.generateSeed(36));
 
         //before registering this node the constructor should
         //be effectively done, don't put anything after
@@ -102,7 +116,7 @@ public class Node {
         RemoteNode.hackyBullshit.put(uuid, this);
 
         // as a replacement let's go ahead and
-        // set up the FunctionalZookeeperClient
+        // set up the org.josh.JoshDb.FunctionalZookeeperClient
         // and a zookeeper server of some description
 
         // i think it might make sense to start up the
@@ -123,14 +137,27 @@ public class Node {
 
     }
 
+    public void close() throws IOException
+    {
+        try
+        {
+            fz.close();
+        }
+        catch (Throwable t)
+        {
+            logger.warn("Failed to close the FunctionalZookeperClient", t);
+            throw t;
+        }
+    }
+
     public UUID getNodeId() {
         return nodeId;
     }
 
     //I think we might just use zookeeper for node registration
     //todo is that a good idea?
-//    public void receiveAnnounce(Message announce) throws IOException, NoSuchAlgorithmException {
-//        Node announcedNode = new Node(announce.sentByNodeId);
+//    public void receiveAnnounce(org.josh.JoshDb.Message announce) throws IOException, NoSuchAlgorithmException {
+//        org.josh.JoshDb.Node announcedNode = new org.josh.JoshDb.Node(announce.sentByNodeId);
 //
 //        // todo initiate/participate in consensus protocol to unanimously agree that this
 //        // new node is authenticated
@@ -139,20 +166,20 @@ public class Node {
     // once again I think we're just going to use zookeeper to
     // deal with node registration
 //    /**
-//     * Announce the existence of this Node to the other nodes that we know about
+//     * Announce the existence of this org.josh.JoshDb.Node to the other nodes that we know about
 //     */
 //    public void announce()
 //    {
-//        Message announcement = Messages.announcement(this);
-//        for (RemoteNode node: nodesOfWhichIAmAware)
+//        org.josh.JoshDb.Message announcement = org.josh.JoshDb.Messages.announcement(this);
+//        for (org.josh.JoshDb.RemoteNode node: nodesOfWhichIAmAware)
 //        {
 //            sendMessage(node, announcement);
 //        }
 //    }
 
     // I guess for now ths is just going to be a stupid simulatory thing,
-    // for running all the nodes locally and RemoteNode.sendMessage is
-    // just going to call Node.onMessage using reflection if necessary
+    // for running all the nodes locally and org.josh.JoshDb.RemoteNode.sendMessage is
+    // just going to call org.josh.JoshDb.Node.onMessage using reflection if necessary
     void sendMessage(RemoteNode to, Message msg)
     {
         to.sendMessage(msg);
@@ -165,9 +192,11 @@ public class Node {
      * @return whether or not it was given
      */
     // TODO this will need to get refactored into a separate class, since
-    // we'll have multiple of these and we'll need each Node to be able
+    // we'll have multiple of these and we'll need each org.josh.JoshDb.Node to be able
     // to talk about any/all of them
     boolean giveAway(long amount) {
+        ensureSensibleAmount(amount);
+
         long localValue, amountAfterRequest;
 
         do
@@ -182,6 +211,23 @@ public class Node {
         } while (!thisNodeValue.compareAndSet(localValue, amountAfterRequest));
 
         return true;
+    }
+
+    private static void ensureSensibleAmount(long amount)
+    {
+        //"common sense" limits
+        if (amount < 0 || amount >= Long.MAX_VALUE / 2)
+        {
+            throw new IllegalArgumentException("You know what you did, " +
+                                               "and you should feel shame");
+        }
+    }
+
+    void receive(long amount)
+    {
+        ensureSensibleAmount(amount);
+
+        thisNodeValue.getAndAdd(amount);
     }
 
 
@@ -200,7 +246,7 @@ public class Node {
 
         //this should be null pretty much just for ack "requests"
         //like this:
-        //Node 1        |       Node 2      |       Node 3
+        //org.josh.JoshDb.Node 1        |       org.josh.JoshDb.Node 2      |       org.josh.JoshDb.Node 3
         //sendMsg ------------->
         //                    reportReceipt----------->
         //                          <-------------------ack
@@ -227,7 +273,7 @@ public class Node {
         sendMessage(recipient, msg);
     }
 
-    //the result of processing a Message is another Message
+    //the result of processing a org.josh.JoshDb.Message is another org.josh.JoshDb.Message
     //so do the thing and find the thing the thing that you
     // need to tell people after you've done the thing
     Message processRequest(Message request)
@@ -308,23 +354,23 @@ public class Node {
 
 
 }
-//each node shall maintain a Node object for other Nodes as well, with as up
-//to date a replica of that Node's state as they can figure out from the messages
+//each node shall maintain a org.josh.JoshDb.Node object for other Nodes as well, with as up
+//to date a replica of that org.josh.JoshDb.Node's state as they can figure out from the messages
 //they overhear, that way they know who to ask when it comes time to satisfy a request
 
 //In order to keep up to date records about what Nodes you have the best connection with, Nodes
 //shall do heartbeats in the background
-//Node 1   |   Node 2
+//org.josh.JoshDb.Node 1   |   org.josh.JoshDb.Node 2
 //msg 1 -------->
 //  <------------ msg2
-//msg1: { helloFrom: Node 1, sentAt: timeSent }
-//msg2: { helloFrom: Node 2, msg1ReceivedAt: timeReceived, sentAt: timeSent }
+//msg1: { helloFrom: org.josh.JoshDb.Node 1, sentAt: timeSent }
+//msg2: { helloFrom: org.josh.JoshDb.Node 2, msg1ReceivedAt: timeReceived, sentAt: timeSent }
 //the separation of received and sent times in msg2 is to allow this to happen asynchronously
-//all Node 2 needs to do is mark down when the message was received and submit it to a queue
+//all org.josh.JoshDb.Node 2 needs to do is mark down when the message was received and submit it to a queue
 //for response. This can happen around an outage or be throttled or be scheduled as lowest priority
 //and it should still be just as accurate, because all we're looking for here is network speed
 //between two Nodes
 
-//deciding that a Node or Set of Nodes is inactive shall require consensus between all other Nodes
+//deciding that a org.josh.JoshDb.Node or Set of Nodes is inactive shall require consensus between all other Nodes
 
-//deciding that a Node is ready to become active shall require consensus between all active Nodes
+//deciding that a org.josh.JoshDb.Node is ready to become active shall require consensus between all active Nodes

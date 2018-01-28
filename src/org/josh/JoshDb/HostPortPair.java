@@ -1,3 +1,5 @@
+package org.josh.JoshDb;
+
 import java.util.List;
 
 public class HostPortPair

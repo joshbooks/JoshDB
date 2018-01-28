@@ -2,17 +2,32 @@
 get this checked into git
 1.
 get zookeeper server starting at all
-    a.
+    a. done
     set the necessary properties for the zookeeper server
-        i.
+        i. done
         figure out what the necessary properties are and list them here:
-            dataDir (string path to datadir, myid file should be datadir/myid)
+            dataDir (string path to dataDir, myid file should be dataDir/myid)
             (I think in the distant future the dataDir and dataLogDir could and
             should be completely in memory)
             clientPort
             server.something property required for every server (there must be more than 1)
-        ii.
+        ii. done (may need to revisit)
         set them
+    b.
+    get a test set up that sets up another node/zookeeper server then runs a
+    another node/zookeeper dealio set up to connect to the first (possibly
+    mocked) node
+
+Make a generic message diff system that returns the messages a given
+node does not possess given two nodes, someday it will be backed by a fancy
+signed merkle tree system, but for now we'll just do a stupid hashset
+set operations thing with raw text and uuids, but the idea is that when
+resuming a node should query the network for all the transactions that it
+missed (which in the future may include transactions concerning things
+it used to track) Eventually I would like tro store things in signed merkle
+trees such that every entry in the receiptChain includes a hash and a
+cryptographic signature, but until then we'll make this generic and make
+a stupid simple implementation based on set operations keyed off UUIDs
 2.
 Choose an odd zookeeper server port between (101,200]
 such that both that port and the port 1 greater than it
@@ -33,3 +48,51 @@ message has actually been stored to nonvolatile memory. SQLite
 has laid some excellent groundwork for this, following their example
 does not seem like a crazy idea.
 7.
+
+40. I think it would be good to have a signed merkle tree as a means
+of transmitting transactions to one another. Shepherding data from one
+host to another involves more concerns than how the pseudotransactions
+are processed. It is in the interest of bandwidth, storage space (ephemeral
+and otherwise), and security that we should use a signed merkle trees.
+Yes we will allow for and expect large merkle tree diffs. The signing
+takes away the reason blockchain people sometimes use a hash, as a
+"proof of work". The idea is to let this database run on the open internet,
+with CRLs deciding if we live or die(or hopefully attest-chain).
+
+41. The idea is then that you have a relationship with each cert that
+allows you to measure the cost of each method you call on a particular
+cert's behalf and charge them for it, that way you can allow people to
+use their own certs to store stuff on other peoples servers. I guess this
+would be a mapping to a bitcoin/ethereum wallet. Anyways, this would allow
+me to open up the MessageAndCode bundle so that other people can use it.
+The code part however is going to need to be subclassed and heavily
+scrutinized, I'm talking abut bytecode level analysis of complexity and
+resource usage(disk, cpu, memory, etc). This is going to require limiting
+the set of possible inputs, but we can still do cool stuff.
+42. this means that you can auction off physical resources by advertising
+the price and performance of your resources, then letting people compare
+them to your competitors and then bid on an open market or list their computer
+as available for hire.
+43. 42 might be a bit premature, I think a more immediately impactful idea
+might be to write some libraries that connect JoshDB with ecommerce software,
+this would be a wordpress killer for sure, more secure, lower price, more flexibility,
+and if they give us a private cert they can give us a mapping between datasets
+and inputs for a jinja template and we can serve most any ecommerce website
+
+
+
+
+90.
+implement a port knocking scheme whereby a node can pass another node
+its identifying information along with the date and time, encrypt it,
+and sign it based on the certificate hierarchy structure enforced
+by the authentication scheme. This would allow secure discovery of
+ports given the hostname as well as secure local management of port blocks
+this would allow each instance of a node run as its own process and
+each certificate authority to get its own block of 128 ports on which
+processes can run as well as a dedicated zookeeper server. This seems
+superior to a design in which each node process has its own zookeeper server.
+
+100.
+In addition to making each machine a node is running on a zookeeper
+server/observer make every node a TURN server for its fellows

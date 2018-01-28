@@ -1,3 +1,5 @@
+package org.josh.JoshDb;
+
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 
 import java.io.*;
@@ -33,7 +35,7 @@ public class RemoteNodeStore
         return new RemoteNode
         (
             triplet[0],
-            Integer.decode(triplet[1]),
+            Integer.parseInt(triplet[1]),
             UUID.fromString(triplet[2])
         );
     }
@@ -48,6 +50,15 @@ public class RemoteNodeStore
     public static Stream<RemoteNode> nodeStreamFromNodeStore(Path storeFile)
     throws IOException
     {
+        if (!Files.exists(storeFile.getParent()))
+        {
+            Files.createDirectories(storeFile.getParent());
+        }
+        if (!Files.exists(storeFile))
+        {
+            Files.createFile(storeFile);
+        }
+
         try (BufferedReader nodeReader = Files.newBufferedReader(storeFile))
         {
             return nodeStreamFromLineStream(nodeReader.lines());
@@ -56,7 +67,14 @@ public class RemoteNodeStore
 
     public void updateCacheFromNodeStream(Stream<RemoteNode> nodeStream)
     {
-        cachedNodes.addAll(nodeStream.collect(Collectors.toList()));
+        try
+        {
+            cachedNodes.addAll(nodeStream.collect(Collectors.toList()));
+        }
+        catch (UncheckedIOException e)
+        {
+            //todo log something
+        }
     }
 
     public void updateCacheFromNodeStore() throws IOException
@@ -72,13 +90,15 @@ public class RemoteNodeStore
         //IOException
         updateCacheFromNodeStore();
 
-        if (cachedNodes.size() == 0)
-        {
-            throw new IOException("The file that was specified as the " +
-                                  "remote node store file didn't contain " +
-                                  "at least one valid host:port:uuid " +
-                                  "triplet");
-        }
+        //unnecessary for now zookeeper automagically starts in standalone
+        //node provided there are no observers
+//        if (cachedNodes.size() == 0)
+//        {
+//            throw new IOException("The file that was specified as the " +
+//                                  "remote node store file didn't contain " +
+//                                  "at least one valid host:port:uuid " +
+//                                  "triplet");
+//        }
     }
 
     public List<RemoteNode> getNodes()
