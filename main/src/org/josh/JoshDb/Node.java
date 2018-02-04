@@ -77,11 +77,11 @@ public class Node implements Closeable {
     LocalQuantity quantity = new LocalQuantity();
 
     public Node()
-            throws IOException,
-            NoSuchAlgorithmException,
-            KeeperException,
-            InterruptedException,
-            QuorumPeerConfig.ConfigException
+        throws IOException,
+        NoSuchAlgorithmException,
+        KeeperException,
+        InterruptedException,
+        QuorumPeerConfig.ConfigException
     {
         //this(UUID.randomUUID());
         //when starting in standalone mode zookeeper expects a server id of 0
@@ -90,11 +90,11 @@ public class Node implements Closeable {
     }
 
     public Node(UUID uuid)
-            throws IOException,
-            NoSuchAlgorithmException,
-            KeeperException,
-            InterruptedException,
-            QuorumPeerConfig.ConfigException
+        throws IOException,
+        NoSuchAlgorithmException,
+        KeeperException,
+        InterruptedException,
+        QuorumPeerConfig.ConfigException
     {
         this.nodeId = uuid;
 

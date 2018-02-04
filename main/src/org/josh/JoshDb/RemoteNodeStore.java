@@ -90,6 +90,11 @@ public class RemoteNodeStore
         //IOException
         updateCacheFromNodeStore();
 
+
+
+        // todo it might make sense for this class to be NodeStore, and tell
+        // node what its identity is, since if we start in standalone our
+        // node id is expected to be 0
         //unnecessary for now zookeeper automagically starts in standalone
         //node provided there are no observers
 //        if (cachedNodes.size() == 0)
@@ -110,9 +115,34 @@ public class RemoteNodeStore
     public void flushNodesToDisk() throws IOException
     {
         Path tempFile = temporaryFilePath();
-        BufferedWriter writer = Files.newBufferedWriter(tempFile);
+        writeCachedNodesToFile(tempFile);
 
-        for(RemoteNode node : cachedNodes)
+        swapFileWithTempFile(tempFile);
+    }
+
+    private void writeNodesToFile(Path file, Set<RemoteNode> nodes) throws IOException
+    {
+        BufferedWriter writer = Files.newBufferedWriter(file);
+
+        writeNodes(writer, nodes);
+
+        writer.flush();
+        writer.close();
+    }
+
+    private void writeCachedNodesToFile(Path file) throws IOException
+    {
+        writeNodesToFile(file, cachedNodes);
+    }
+
+    public static void writeNodes
+    (
+        BufferedWriter writer,
+        Set<RemoteNode> nodes
+    )
+        throws IOException
+    {
+        for(RemoteNode node : nodes)
         {
             HostPortPair pair = node.getHostPortPair();
             UUID id = node.getId();
@@ -120,11 +150,6 @@ public class RemoteNodeStore
             writer.write(pair.host + ":" + pair.port + ":" + id.toString());
             writer.newLine();
         }
-
-        writer.flush();
-        writer.close();
-
-        swapFileWithTempFile(tempFile);
     }
 
     private void swapFileWithTempFile(Path tempFile) throws IOException

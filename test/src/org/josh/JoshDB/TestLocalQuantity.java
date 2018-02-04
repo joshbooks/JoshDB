@@ -51,22 +51,26 @@ public class TestLocalQuantity
 
         for (int i = 0; i < 10; i++)
         {
-            new Thread(()->
-            {
-                try
-                {
-                    Thread.sleep(new Random().nextInt(2000));
-                }
-                catch (InterruptedException e)
-                {
-                    System.out.println
-                    (
-                        "Worker thread was interrupted trying to sleep"
-                        + e.getMessage()
-                    );
-                }
-                quantity.giveAway(10);
-            }).start();
+            new Thread
+            (
+                ()->
+                    {
+                        try
+                        {
+                            Thread.sleep(new Random().nextInt(2000));
+                        }
+                        catch (InterruptedException e)
+                        {
+                            System.out.println
+                            (
+                                "Worker thread was interrupted trying to sleep"
+                                + e.getMessage()
+                            );
+                        }
+                        quantity.giveAway(10);
+                    }
+            )
+            .start();
         }
 
         try
@@ -89,29 +93,34 @@ public class TestLocalQuantity
         for (int i = 0; i < 10; i++)
         {
             final int threadNumber = i;
-            new Thread(()->
-            {
-                try
-                {
-                    Thread.sleep(new Random().nextInt(2000));
-                }
-                catch (InterruptedException e)
-                {
-                    System.out.println
-                            (
-                                    "Worker thread was interrupted trying to sleep"
-                                    + e.getMessage()
-                            );
-                }
-                if (threadNumber % 2 == 0)
-                {
-                    quantity.giveAway(10);
-                }
-                else
-                {
-                    quantity.receive(10);
-                }
-            }).start();
+            new Thread
+            (
+                ()->
+                    {
+                        try
+                        {
+                            Thread.sleep(new Random().nextInt(2000));
+                        }
+                        catch (InterruptedException e)
+                        {
+                            System.out.println
+                                    (
+                                        "Worker thread was interrupted trying to sleep"
+                                        + e.getMessage()
+                                    );
+                        }
+
+                        if (threadNumber % 2 == 0)
+                        {
+                            quantity.giveAway(10);
+                        }
+                        else
+                        {
+                            quantity.receive(10);
+                        }
+                    }
+            )
+            .start();
         }
 
         try
