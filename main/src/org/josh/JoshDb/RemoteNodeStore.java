@@ -24,6 +24,11 @@ public class RemoteNodeStore
         this(RemoteNodeStoreSettings.storeFileDirectory.resolve(storeFileName));
     }
 
+    public Path storePath()
+    {
+        return remoteNodeStoreFile;
+    }
+
     public static RemoteNode nodeFromString(String line)
     {
         String[] triplet = line.split(":");
@@ -112,7 +117,7 @@ public class RemoteNodeStore
     }
 
 
-    public void flushNodesToDisk() throws IOException
+    public void flushCachedNodesToDisk() throws IOException
     {
         Path tempFile = temporaryFilePath();
         writeCachedNodesToFile(tempFile);
@@ -188,7 +193,7 @@ public class RemoteNodeStore
             nodeStreamFromLineStream(lineStreamFromString(serializedNodes))
         );
 
-        flushNodesToDisk();
+        flushCachedNodesToDisk();
     }
 
     public Stream<RemoteNode> getNodesStream()
