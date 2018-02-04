@@ -5,7 +5,8 @@
     <artifactId>JoshDB</artifactId>
     <version>1.0-SNAPSHOT</version>
     <build>
-        <sourceDirectory>src</sourceDirectory>
+        <sourceDirectory>main/src</sourceDirectory>
+        <testSourceDirectory>test/src</testSourceDirectory>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -62,6 +63,13 @@
             <groupId>com.sangupta</groupId>
             <artifactId>murmur</artifactId>
             <version>1.0.0</version>
+        </dependency>
+        <!-- testing dependencies -->
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>6.8</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

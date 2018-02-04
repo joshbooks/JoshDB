@@ -172,10 +172,51 @@ public class MessageTreeNode
 
 
 
-    static class KeySet
+    static class KieSet
     {
+        static class KieSetNode
+        {
+            int thisNodeVal = 0;
+            HashMap<Integer, KieSetNode> children;
+
+            KieSetNode() {}
+
+            KieSetNode(int val)
+            {
+                thisNodeVal = val;
+            }
+
+        }
         //TODO I think I remember a project where I inserted a tree structure into an
         //array in a very efficient way
+
+        KieSetNode rootNode = new KieSetNode();
+
+        KieSet fromNode(MessageTreeNode map)
+        {
+            KieSet kies = new KieSet();
+            kies.rootNode = new KieSetNode();
+
+            fromNode(map, kies.rootNode, 0);
+
+            return kies;
+        }
+
+        private static void fromNode(MessageTreeNode subMap, KieSetNode corresponding, int nodeValue)
+        {
+            // the concurrent nature of this tree is going to be a problem here
+            // this code is buggy and racy as hell
+            corresponding.thisNodeVal = nodeValue;
+            if (subMap != null && subMap.subtrees != null)
+            {
+                subMap.subtrees.entrySet().forEach(entry ->
+                {
+                    KieSetNode nodeForChild = new KieSetNode();
+                    corresponding.children.put(entry.getKey(), nodeForChild);
+                    fromNode(entry.getValue(), nodeForChild, entry.getKey());
+                });
+            }
+        }
 
     }
 

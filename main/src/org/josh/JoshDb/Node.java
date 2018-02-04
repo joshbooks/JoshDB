@@ -22,15 +22,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class Node implements Closeable {
 
 
-
-    // so this guy here is the distributed value thingy,
-    // for now there is exactly one of them, and each node is
-    // tracking their own little piece of the same distributed
-    // value
-    //we might want to instead use Cliff Click's Counter class here
-    //to allow for better multithreaded performance, but we'll see
-    AtomicLong thisNodeValue;
-
     static final Path logFiles = Paths.get("./logs");
 
     private static final Logger logger = LoggerFactory.getLogger(Node.class);
@@ -78,6 +69,12 @@ public class Node implements Closeable {
     TreeSet<RemoteNode> nodesOfWhichIAmAware = new TreeSet<>();
 
     HashMap<UUID, RemoteNode> nodesByUuid;
+
+    // so this guy here is the distributed value thingy,
+    // for now there is exactly one of them, and each node is
+    // tracking their own little piece of the same distributed
+    // value
+    LocalQuantity quantity = new LocalQuantity();
 
     public Node()
             throws IOException,
@@ -128,7 +125,7 @@ public class Node implements Closeable {
         //the problem is that I'm not sure if it's safe to
         // assume that if the zookeeper server is up that
         // JoshDb server is up
-        //meh, they're going to b running as the same process,
+        //meh, they're going to be running as the same process,
         //let's just make sure that
 
 
@@ -186,49 +183,6 @@ public class Node implements Closeable {
         //todo
     }
 
-    /**
-     * Give away some {@code amount} of stuff from our own local stash of stuff
-     * @param amount the amount of stuff to give away
-     * @return whether or not it was given
-     */
-    // TODO this will need to get refactored into a separate class, since
-    // we'll have multiple of these and we'll need each org.josh.JoshDb.Node to be able
-    // to talk about any/all of them
-    boolean giveAway(long amount) {
-        ensureSensibleAmount(amount);
-
-        long localValue, amountAfterRequest;
-
-        do
-        {
-            localValue = thisNodeValue.get();
-
-            if (localValue < amount)
-            {
-                return false;
-            }
-            amountAfterRequest = localValue - amount;
-        } while (!thisNodeValue.compareAndSet(localValue, amountAfterRequest));
-
-        return true;
-    }
-
-    private static void ensureSensibleAmount(long amount)
-    {
-        //"common sense" limits
-        if (amount < 0 || amount >= Long.MAX_VALUE / 2)
-        {
-            throw new IllegalArgumentException("You know what you did, " +
-                                               "and you should feel shame");
-        }
-    }
-
-    void receive(long amount)
-    {
-        ensureSensibleAmount(amount);
-
-        thisNodeValue.getAndAdd(amount);
-    }
 
 
     //ok, so I think this is going to get broken up into little async blocks

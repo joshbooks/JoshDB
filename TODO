@@ -49,6 +49,8 @@ has laid some excellent groundwork for this, following their example
 does not seem like a crazy idea.
 7.
 
+
+39. 40,43s/merkle tree/concurrent patricia trie
 40. I think it would be good to have a signed merkle tree as a means
 of transmitting transactions to one another. Shepherding data from one
 host to another involves more concerns than how the pseudotransactions
@@ -58,6 +60,7 @@ Yes we will allow for and expect large merkle tree diffs. The signing
 takes away the reason blockchain people sometimes use a hash, as a
 "proof of work". The idea is to let this database run on the open internet,
 with CRLs deciding if we live or die(or hopefully attest-chain).
+
 
 41. The idea is then that you have a relationship with each cert that
 allows you to measure the cost of each method you call on a particular
@@ -73,13 +76,11 @@ the set of possible inputs, but we can still do cool stuff.
 the price and performance of your resources, then letting people compare
 them to your competitors and then bid on an open market or list their computer
 as available for hire.
-43. 42 might be a bit premature, I think a more immediately impactful idea
+43. 41,42 might be a bit premature, I think a more immediately impactful idea
 might be to write some libraries that connect JoshDB with ecommerce software,
 this would be a wordpress killer for sure, more secure, lower price, more flexibility,
 and if they give us a private cert they can give us a mapping between datasets
 and inputs for a jinja template and we can serve most any ecommerce website
-
-
 
 
 90.
@@ -96,3 +97,32 @@ superior to a design in which each node process has its own zookeeper server.
 100.
 In addition to making each machine a node is running on a zookeeper
 server/observer make every node a TURN server for its fellows
+
+120.
+implement a timed message subtype that records how long each step of execution takes,
+then-- provided each message between db servers and within a db server can be traced
+back to the client message that sent it and will become timed themselves when spawned
+by a timed client message (this demands that we spend some time considering how to deal
+with timing attacks in a database [another stupid thing people shouldn't have to worry
+about in the application layer], my initial thought is that the way a query[or access
+or whatever] is processed is directly related to part of a data structure which we will
+be allowing users to describe using instance methods ie toString(), comparison(), etc. They
+should also be able to describe who should be able to access certain data structures and
+elements of data structures as part of the declaration, something like the scala
+private[moduleName] but instead private[AD domain|cert authority|kerberos whatever]),
+ a user could do some quick and dirty profiling of
+their db usage, allowing them to selectively deploy 121
+121.
+implement a profiled message type that does full tracing of db message passing, tracing
+through the literal code of the database as it was executed in the course of processing
+the specific message with stack traces, memory usage, cpu time, clock time, etc.
+This would be for in depth debugging and performance analysis of a
+database workload/query/whatever especially if we make it integrate nice with yourkit
+and jprofiler and datadog and stuff (does jprofiler do dbs? I know yourkit does)
+122.
+This profiled type seems like a pretty great example of a "premium" side of a freemium
+divide since it is absolutely something people will eventually need, but it is unnecessary
+while the user is first getting a feel for the database and deciding if they like it
+
+
+
