@@ -18,11 +18,11 @@ public class TestRemoteNodeStore
     {
         RemoteNodeStore store = new RemoteNodeStore();
 
-        Set<RemoteNode> testRemoteSet = new HashSet<RemoteNode>();
+        Set<RemoteNode> testRemoteSet = new HashSet<>();
 
         for (int i = 0 ; i < 10; i++)
         {
-            testRemoteSet.add(new RemoteNode("test"+i, i, new UUID(i, i)));
+            testRemoteSet.add(new RemoteNode("test" + i, i, new UUID(i, i)));
         }
 
         store.updateCacheFromNodeStream(testRemoteSet.stream());

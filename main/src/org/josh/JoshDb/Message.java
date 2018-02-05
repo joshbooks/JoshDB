@@ -5,9 +5,11 @@ import java.util.UUID;
 
 enum MessageType
 {
-    ANNOUNCE,
+    //ANNOUNCE,
+    REQUEST,
     INTENT,
-    ACK, RECEIPT
+    ACK,
+    RECEIPT
 }
 
 public class Message {

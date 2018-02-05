@@ -235,9 +235,9 @@ public class Node implements Closeable {
         //todo big shitty switch statement
         switch (request.type)
         {
-            case ANNOUNCE:
-                //TODO this is going to be a whole thing
-                return null;
+//            case ANNOUNCE:
+//                //TODO this is going to be a whole thing
+//                return null;
 
             case ACK:
                 return null;
@@ -291,7 +291,7 @@ public class Node implements Closeable {
 
     void reportReceipt(Message received)
     {
-        Message receipt = Messages.receipt(received);
+        Message receipt = Messages.receipt(received, this);
         sendToOtherNodes(receipt);
     }
 
@@ -301,7 +301,7 @@ public class Node implements Closeable {
     // sent the message that resulted in this message
     void reportIntent(Message responseToBe)
     {
-        Message intent = Messages.intent(responseToBe);
+        Message intent = Messages.intent(responseToBe, this);
         sendToOtherNodes(intent);
     }
 

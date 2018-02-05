@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 public class FunctionalZookeeperClient implements Closeable, Watcher
 {
     private final RemoteNodeStore remotes;
+    private final UUID nodeId;
     private ZooKeeper zk;
 
     private static final Logger logger = LoggerFactory.getLogger(FunctionalZookeeperClient.class);
@@ -33,9 +34,11 @@ public class FunctionalZookeeperClient implements Closeable, Watcher
     private final NonBlockingHashMap<String, Object> cached = new NonBlockingHashMap<>();
     private final ScheduledExecutorService nodeUpdaterService =
             Executors.newScheduledThreadPool(1);
-    private final Thread serverThread;
+    private Thread serverThread;
 
     private AtomicReference<ExposedQuorumPeer> unprotectedZookeeper = new AtomicReference<>();
+
+    private final int zookeeperPort;
 
     public FunctionalZookeeperClient(Path remoteNodeStorePath, UUID nodeId) throws IOException, QuorumPeerConfig.ConfigException
     {
@@ -54,10 +57,13 @@ public class FunctionalZookeeperClient implements Closeable, Watcher
 
     public FunctionalZookeeperClient(RemoteNodeStore remotes, UUID nodeId) throws IOException, QuorumPeerConfig.ConfigException
     {
+        this.nodeId = nodeId;
 
         // so step one we save off the RemoteNodes start the zookeeper
         // client using the RemoteNodes
         this.remotes = remotes;
+
+        this.zookeeperPort = findUsableZookeeperPort();
 
         startZookeeperClient
         (
@@ -92,7 +98,6 @@ public class FunctionalZookeeperClient implements Closeable, Watcher
         //then we set up the server
         long zookeeperId = nodeId.getLeastSignificantBits();
 
-        QuorumPeerConfig config = new QuorumPeerConfig();
         Properties properties = new Properties();
 
         // so now we just need to set the properties required for
@@ -156,11 +161,22 @@ public class FunctionalZookeeperClient implements Closeable, Watcher
 
         //Zookeeper expects us to have self in the list of servers,
         // TODO do this programmatically instead of manually
-        RemoteNode selfAsRemote =
-                new RemoteNode("localhost", 1025, nodeId);
+        RemoteNode selfAsRemote = getSelfAsRemoteNode();
 
         setPropertyFromKeyValArray(properties, keyValArrayForRemoteNode(selfAsRemote));
 
+
+        runZookeeperServerFromProperties(properties);
+    }
+
+    private RemoteNode getSelfAsRemoteNode()
+    {
+        return new RemoteNode("localhost", zookeeperPort, nodeId);
+    }
+
+    private void runZookeeperServerFromProperties(Properties properties) throws IOException, QuorumPeerConfig.ConfigException
+    {
+        QuorumPeerConfig config = new QuorumPeerConfig();
         config.parseProperties(properties);
 
         serverThread = new Thread(() ->

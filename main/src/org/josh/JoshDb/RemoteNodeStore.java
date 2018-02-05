@@ -9,6 +9,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
+
 public class RemoteNodeStore
 {
     private Set<RemoteNode> cachedNodes = new NonBlockingHashSet<>();
@@ -168,7 +170,7 @@ public class RemoteNodeStore
             //todo log something
         }
 
-        Files.move(tempFile, remoteNodeStoreFile);
+        Files.move(tempFile, remoteNodeStoreFile, ATOMIC_MOVE);
     }
 
     private Path temporaryFilePath()
