@@ -1,5 +1,6 @@
 package org.josh.JoshDb;
 
+import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.dsl.Disruptor;
 import org.slf4j.Logger;
@@ -84,7 +85,16 @@ public class MessagePersistor {
             (
                 (MessageAndCodeBundle bundle, long l, boolean b) ->
                     bundle.code.onMessagePersisted(bundle.msg)
-            );
+            )
+            .then
+            (
+                (event, sequence, endOfBatch) ->
+                {
+                    event.code = null;
+                    event.msg= null;
+                }
+            )
+        ;
 
         disruptor.start();
         ringBuffer = disruptor.getRingBuffer();
