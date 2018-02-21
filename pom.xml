@@ -44,6 +44,12 @@
             <artifactId>high-scale-lib</artifactId>
             <version>1.0.6</version>
         </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-all</artifactId> <!-- Use 'netty-all' for 4.0 or above -->
+            <version>4.1.21.Final</version>
+            <scope>compile</scope>
+        </dependency>
         <!-- murmur hash-->
         <dependency>
             <groupId>com.sangupta</groupId>

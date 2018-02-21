@@ -11,5 +11,6 @@
     <orderEntry type="library" name="Maven: org.apache.zookeeper:zookeeper:3.4.11" level="project" />
     <orderEntry type="library" name="Maven: com.boundary:high-scale-lib:1.0.6" level="project" />
     <orderEntry type="library" name="Maven: com.lmax:disruptor:3.3.7" level="project" />
+    <orderEntry type="library" name="Maven: io.netty:netty-all:4.1.21.Final" level="project" />
   </component>
 </module>

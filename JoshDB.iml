@@ -19,6 +19,7 @@
     <orderEntry type="library" name="Maven: io.netty:netty:3.10.5.Final" level="project" />
     <orderEntry type="library" name="Maven: org.slf4j:slf4j-api:1.7.25" level="project" />
     <orderEntry type="library" name="Maven: com.boundary:high-scale-lib:1.0.6" level="project" />
+    <orderEntry type="library" name="Maven: io.netty:netty-all:4.1.21.Final" level="project" />
     <orderEntry type="library" name="Maven: com.sangupta:murmur:1.0.0" level="project" />
     <orderEntry type="library" scope="TEST" name="Maven: org.testng:testng:6.8" level="project" />
     <orderEntry type="library" name="Maven: junit:junit:4.10" level="project" />
