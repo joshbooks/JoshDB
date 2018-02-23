@@ -12,3 +12,11 @@ I could get the distributed atomic stuff really really right.
    different directory, then checkout master, and figure out how to
    put this stuff into master and do the features people care about
    using this stuff
+ - So it turns out if inside the messages I store the time at which 
+   the messages entered different stages of the message pipeline and
+   what message each message is in relation to I should be able to 
+   implement something like CoDel across my entire database. This 
+   requires the message trie logic from master.
+ - This timing information can be deleted as part of the compression/
+   archival/consolidation of old messages described in master.
+ - let's maybe do some persistence stuff now
