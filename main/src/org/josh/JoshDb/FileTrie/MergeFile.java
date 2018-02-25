@@ -89,41 +89,64 @@ public class MergeFile
 
     public static void writeSerializedObject(Path file, byte[] serializedObject) throws IOException
     {
-        // this allocation makes me a little sad
-        byte[] page = new byte[4096];
+        int remainingLength = serializedObject.length;
+        int position = 0;
+        boolean isFirstIteration = true;
 
-        int length = serializedObject.length;
-
-        if (length <= (PIPE_BUF - 12)) //most common single page case
+        while (remainingLength > -4)
         {
-            System.arraycopy(OBJECT_BEGIN, 0, page, 0, 4);
-            System.arraycopy(serializedObject, 0, page, 4, length);
-            System.arraycopy(OBJECT_END, 0, page, length + 4, 4);
-            System.arraycopy(PAGE_END, 0, page, PIPE_BUF - 4, 4);
-            writePage(file, page);
+            // this allocation makes me a little sad
+            //if we explicitly write zeroes in the cases
+            // that require runs of zeroes we get rid of it
+            byte[] page = new byte[PIPE_BUF];
+
+            if (remainingLength <= 0)
+            {
+                //then we just have to write the remaining bit of OBJECT_END
+
+                // yes you did read the logic correctly, the length of the object being
+                //between 4096-8 and 4096-12 does in fact mean we're going to waste
+                //almost a whole page so we can finish writing the OBJECT_END magic bytes
+                //I don't like it any more than you do but it's the only way I can
+                //think of right now to guarantee the properties that I'm after
+            }
+            else if (remainingLength <= (PIPE_BUF - 12))
+            {
+                System.arraycopy(OBJECT_BEGIN, 0, page, 0, 4);
+                System.arraycopy(serializedObject, 0, page, 4, remainingLength);
+                System.arraycopy(OBJECT_END, 0, page, remainingLength + 4, 4);
+                System.arraycopy(PAGE_END, 0, page, PIPE_BUF - 4, 4);
+                writePage(file, page);
+                remainingLength = -4;
+            }
+            else if (remainingLength == (PIPE_BUF - 8))
+            { //"magic number elision" is a great name for a band
+                System.arraycopy(OBJECT_BEGIN, 0, page, 0, 4);
+                System.arraycopy(serializedObject, 0, page, 4, remainingLength);
+                System.arraycopy(OBJECT_END, 0, page, remainingLength + 4, 4);
+                writePage(file, page);
+                remainingLength = -4;
+            } else // multi page case
+            {
+                if (isFirstIteration)
+                {
+                    System.arraycopy(OBJECT_BEGIN, 0, page, 0, 4);
+                }
+                else
+                {
+                    System.arraycopy(PAGE_BEGIN, 0, page, 0, 4);
+                }
+
+                System.arraycopy(serializedObject, position, page, 4, (PIPE_BUF - 4));
+                position += (PIPE_BUF - 4);
+                remainingLength = (PIPE_BUF - 4);
+
+                System.arraycopy(PAGE_END, 0, page, PIPE_BUF - 4, 4);
+
+                writePage(file, page);
+            }
+            isFirstIteration = false;
         }
-        if (length == (PIPE_BUF - 8)) //very lucky single page case
-        { //"magic number elision" is a great name for a band
-            System.arraycopy(OBJECT_BEGIN, 0, page, 0, 4);
-            System.arraycopy(serializedObject, 0, page, 4, length);
-            System.arraycopy(OBJECT_END, 0, page, length + 4, 4);
-            writePage(file, page);
-        }
-        else // multi page case
-        {
-            // yes you did read the logic correctly, the length of the object being
-            //between 4096-8 and 4096-12 does in fact mean we're going to waste
-            //almost a whole page so we can finish writing the OBJECT_END magic bytes
-            //I don't like it any more than you do but it's the only way I can
-            //think of right now to guarantee the properties that I'm after
-            
-        }
-
-
-
-
-
-
     }
 
 
