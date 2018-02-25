@@ -1,4 +1,4 @@
-package org.josh.JoshDb.MessageTree;
+package org.josh.JoshDb.MessageTrie;
 
 public class MessageTree
 {

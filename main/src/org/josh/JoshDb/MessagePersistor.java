@@ -59,12 +59,12 @@ public class MessagePersistor {
 
 
         disruptor =
-                new Disruptor<>
-                (
-                    MessageAndCodeBundle::new,
-                    bufferSize,
-                        disruptorThreadFactory
-                );
+            new Disruptor<>
+            (
+                MessageAndCodeBundle::new,
+                bufferSize,
+                disruptorThreadFactory
+            );
 
         //noinspection unchecked
         disruptor

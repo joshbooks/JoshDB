@@ -1,4 +1,4 @@
-package org.josh.JoshDb.MessageTree;
+package org.josh.JoshDb.MessageTrie;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.josh.JoshDb.Message;
@@ -120,7 +120,7 @@ public class MessageTreeNode
 
     /**
      * @param messageWrapper
-     * @return whether or not the MessageTree was changed as a result of this call
+     * @return whether or not the MessageTrie was changed as a result of this call
      */
     private boolean add(UtilityMessageWrapper messageWrapper)
     {
