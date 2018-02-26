@@ -109,6 +109,10 @@ public class MergeFile
                 //almost a whole page so we can finish writing the OBJECT_END magic bytes
                 //I don't like it any more than you do but it's the only way I can
                 //think of right now to guarantee the properties that I'm after
+
+                System.arraycopy(OBJECT_END, -remainingLength, page, 0, remainingLength + 4);
+                writePage(file, page);
+                remainingLength = -4;
             }
             else if (remainingLength <= (PIPE_BUF - 12))
             {
