@@ -3,25 +3,27 @@ package org.josh.JoshDb;
 import java.util.List;
 import java.util.UUID;
 
-enum MessageType
-{
-    //ANNOUNCE,
-    REQUEST,
-    INTENT,
-    ACK,
-    RECEIPT
-}
+
 
 public class Message {
-    UUID messageId;
+    public enum MessageType
+    {
+        //ANNOUNCE,
+        REQUEST,
+        INTENT,
+        ACK,
+        RECEIPT
+    }
 
-    long sentAt;
+    public UUID messageId;
+
+    public long sentAt;
     //this will become the certificate of the org.josh.JoshDb.Node
-    UUID sentByNodeId;
+    public UUID sentByNodeId;
 
-    List<Receipt> receiptChain; //will be blank when first sending
+    public List<Receipt> receiptChain; //will be blank when first sending
 
-    Object data;
+    public Object data;
 
-    MessageType type;
+    public MessageType type;
 }

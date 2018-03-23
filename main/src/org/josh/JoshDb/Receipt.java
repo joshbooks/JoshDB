@@ -10,23 +10,27 @@ public class Receipt {
     //this will become the certificate of the receipt
     UUID receivedBy;
 
-    public Receipt(Receipt toCopy)
+    public static Receipt customerCopy(Receipt toCopy)
     {
-        this.receivedAt = toCopy.receivedAt;
-        this.receivedBy = UUID.fromString(toCopy.receivedBy.toString());
+        Receipt copy = new Receipt();
+        copy.receivedAt = toCopy.receivedAt;
+        copy.receivedBy = UUID.fromString(toCopy.receivedBy.toString());
+        return copy;
     }
 
-    public Receipt(Node node)
+    public static Receipt checkPlease(Node node)
     {
-        receivedAt = System.currentTimeMillis();
-        receivedBy = UUID.fromString(node.getNodeId().toString());
+        Receipt check = new Receipt();
+        check.receivedAt = System.currentTimeMillis();
+        check.receivedBy = UUID.fromString(node.getNodeId().toString());
+        return check;
     }
 
     public static List<Receipt> nonModifyingAppend(List<Receipt> existing, Receipt addition)
     {
         List<Receipt> appendedList = new ArrayList<>();
 
-        existing.stream().map(Receipt::new).forEach(appendedList::add);
+        existing.stream().map(Receipt::customerCopy).forEach(appendedList::add);
 
         appendedList.add(addition);
 

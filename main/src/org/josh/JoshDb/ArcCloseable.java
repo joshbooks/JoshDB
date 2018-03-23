@@ -1,5 +1,7 @@
 package org.josh.JoshDb;
 
+import org.cliffc.high_scale_lib.Counter;
+
 import java.io.BufferedWriter;
 import java.io.Closeable;
 import java.io.IOException;
@@ -11,6 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class ArcCloseable<T extends Closeable>
 {
+    //this shouldn't be nearly as hot a path as LocalQuantity so let's keep
+    // it simple and do "expensive" CASerations
     private final AtomicInteger refs = new AtomicInteger(0);
 
     private final T backingCloseable;

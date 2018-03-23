@@ -13,13 +13,13 @@ public class Messages {
         Message copy = new Message();
         copy.receiptChain = of.receiptChain;
         copy.data = of;
-        copy.type = MessageType.RECEIPT;
+        copy.type = Message.MessageType.RECEIPT;
         of.receiptChain =
-                Receipt.nonModifyingAppend
-                        (
-                                of.receiptChain,
-                                new Receipt(thisNode)
-                        );
+            Receipt.nonModifyingAppend
+            (
+                of.receiptChain,
+                Receipt.checkPlease(thisNode)
+            );
 
         return copy;
     }
@@ -29,7 +29,7 @@ public class Messages {
         Message intent = new Message();
         intent.receiptChain = responseToBe.receiptChain;
         intent.data = responseToBe;
-        intent.type = MessageType.INTENT;
+        intent.type = Message.MessageType.INTENT;
 
         setMessageSentInfo(intent, self);
 
@@ -65,14 +65,14 @@ public class Messages {
     {
         Message ack = new Message();
 
-        ack.type = MessageType.ACK;
+        ack.type = Message.MessageType.ACK;
         ack.receiptChain = msg.receiptChain;
         ack.receiptChain =
-                Receipt.nonModifyingAppend
-                (
-                    msg.receiptChain,
-                    new Receipt(thisNode)
-                );
+            Receipt.nonModifyingAppend
+            (
+                msg.receiptChain,
+                Receipt.checkPlease(thisNode)
+            );
         ack.data = msg.messageId;
 
         return ack;
@@ -87,7 +87,7 @@ public class Messages {
     {
         Message requestMessage = new Message();
 
-        requestMessage.type = MessageType.REQUEST;
+        requestMessage.type = Message.MessageType.REQUEST;
 
         QuantityRequest request = new QuantityRequest();
 

@@ -2,33 +2,61 @@ package org.josh.JoshDb.MessageTrie;
 
 import org.josh.JoshDb.Message;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
-
-import static com.sangupta.murmur.Murmur3.hash_x64_128;
-import static com.sangupta.murmur.Murmur3.hash_x86_32;
 
 public class UtilityMessageWrapper
 {
     public final Message data;
-    private static final long murmurSeed = 0x51284249;
+    private final int[] fourPartHashCode;
+    private final ThreadLocal<Integer> trieLevel = new ThreadLocal<>();
 
     public UtilityMessageWrapper(Message data)
     {
         this.data = data;
+        fourPartHashCode =
+            new int[]
+            {
+                (int) (data.messageId.getMostSignificantBits() >> 32),
+                (int) data.messageId.getMostSignificantBits(),
+                (int) (data.messageId.getLeastSignificantBits() >> 32),
+                (int) data.messageId.getLeastSignificantBits()
+            };
     }
 
-    byte[] memoizedDataBytes = null;
-    private byte[] bytesForData()
+    private static byte[] bytesForData(UtilityMessageWrapper wrapper)
     {
-        if (memoizedDataBytes == null)
+        int length = messageLength(wrapper);
+        ByteBuffer buffer = ByteBuffer.allocateDirect(length);
+
+        //todo insert primitiveTypes, structs, and lists of same using
+        // standard ByteBuffer operations and loops
+
+        //todo this might work better as an EnumMap of function pointers
+        switch (wrapper.data.type)
         {
-            memoizedDataBytes = new byte[]{0, 0, 0, 0};//todo
+            //todo some recursive cases where we go
+            // bytesForData(new UtilityMessageWrapper((Message) wrapper.data.data);
+            //and some more boring cases
         }
 
-        return memoizedDataBytes;
+        return buffer.array();
     }
 
-    private ThreadLocal<Integer> trieLevel;
+    private static int messageLength(UtilityMessageWrapper wrapper)
+    {
+        int length = 0;
+
+        //todo size of all primitive types/structs and lists of same
+
+        //todo this might work better as an enum map of function pointers
+        switch (wrapper.data.type)
+        {
+            //todo some nice recursion in here to determine the size of data.data
+        }
+
+        return length;
+    }
 
     /**
      * Not thread safe, sets the trielevel so this object
@@ -48,33 +76,20 @@ public class UtilityMessageWrapper
 
     }
 
-    private int[] memoizedFourPartHash = null;
-    int[] fourPartHashCode()
-    {
-        if (memoizedFourPartHash == null)
-        {
-            long[] longs = hash_x64_128(bytesForData(), bytesForData().length, murmurSeed);
-            memoizedFourPartHash =
-                    new int[]
-                    {
-                        (int) (longs[0] >> 32),
-                        (int) (longs[0]),
-                        (int) (longs[1] >> 32),
-                        (int) (longs[1])
-                    };
-        }
-
-        return memoizedFourPartHash;
-    }
-
-    long longHashCode()
-    {
-        return hash_x86_32(bytesForData(), bytesForData().length, murmurSeed);
-    }
-
     @Override
     public int hashCode()
     {
-        return fourPartHashCode()[trieLevel.get()];
+        Integer localTrieLevel = trieLevel.get();
+
+        if (localTrieLevel == null)
+        {
+            localTrieLevel = 0;
+        }
+
+        int hash = fourPartHashCode[localTrieLevel];
+
+        trieLevel.set(localTrieLevel + 1);
+
+        return hash;
     }
 }
