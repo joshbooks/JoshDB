@@ -85,7 +85,7 @@ public class QuantityRequestMessageHandler
 
     private void checkType(Message quantityRequestMessage) throws WrongMessageTypeException, WrongRequesTypeException
     {
-        if (quantityRequestMessage.type != MessageType.REQUEST)
+        if (quantityRequestMessage.type != Message.MessageType.REQUEST)
         {
             throw new WrongMessageTypeException("This handler only handles REQUEST Messages");
         }

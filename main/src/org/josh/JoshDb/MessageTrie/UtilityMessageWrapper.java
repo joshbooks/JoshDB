@@ -69,12 +69,11 @@ public class UtilityMessageWrapper
         this.trieLevel.set(trieLevel);
     }
 
-    @Override
-    public String toString()
-    {
-        return Arrays.toString(bytesForData());
-
-    }
+//    @Override
+//    public String toString()
+//    {
+//        return Arrays.toString(bytesForData());
+//    }
 
     @Override
     public int hashCode()

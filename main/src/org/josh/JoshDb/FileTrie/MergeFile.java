@@ -17,10 +17,16 @@ public class MergeFile implements Iterable<byte[]>
 {
     // all objects representations stored to file will take up a positive
     // integer multiple of PIPE_BUF.
-    // each page must start with OBJECT_BEGIN or PAGE_BEGIN and end with
-    // PAGE_END or OBJECT_END
+    // each page must start with PAGE_BEGIN and end with
+    // PAGE_END, all object representations shall begin with a long containing the
+    // object sequence number of that object (obtained by calling
+    // objectSequenceNumber.getAndIncrement()) followed by OBJECT_BEGIN and end with
+    // OBJECT_END
     // If OBJECT_END occurs before the end of the page, the remainder of the page
-    // must be filled with zeroes up to PAGE_END
+    // must be filled with zeroes up to PAGE_END if object end occurs less than 4 bytes
+    // before PAGE_END as many bytes of OBJECT_END as can be written in that page shall
+    // be written and the rest will be written on the next page, followed by zeroes up
+    // until PAGE_END of the following page
 
     // hacky nonsense, should be dynamically determined
     // based on the underlying filesystem, but using ext3 for now
@@ -39,18 +45,26 @@ public class MergeFile implements Iterable<byte[]>
 
     private final Path file;
 
-    /**
-     * Every time you want to write an object to a MergeFile, you just
-     * getAndAdd this guy and write out the resulting long after each
-     * PAGE_BEGIN marker for that object, that way we can keep track
-     * of which Object each page corresponds to
-     */
-    private final AtomicLong objectsWritten = new AtomicLong(0);
-    //todo objectsWritten being a field of this class means that
-    // we can't have a public constructor, we should really have
-    // an atomic registry thing
+    // todo it seems like instantiation is pretty much just done to implement iterator
+    // maybe that should be split into a different class??
+    private static NonBlockingHashMap<Path, MergeFile> registry =
+            new NonBlockingHashMap<>();
 
-    public MergeFile(Path file)
+    public static MergeFile mergeFileForPath(Path path)
+    {
+        MergeFile temp = new MergeFile(path);
+
+        MergeFile shared = registry.putIfAbsent(path, temp);
+
+        if (shared == null)
+        {
+            shared = temp;
+        }
+
+        return shared;
+    }
+
+    private MergeFile(Path file)
     {
         this.file = file;
     }
@@ -103,7 +117,7 @@ public class MergeFile implements Iterable<byte[]>
             {
                 try
                 {
-                    return bytesForNextObject(effectiveIn);
+                    return arrayFromList(pageListForNextObject(effectiveIn));
                 }
                 catch (IOException e)
                 {
@@ -114,47 +128,122 @@ public class MergeFile implements Iterable<byte[]>
         };
     }
 
-    private byte[] bytesForNextObject(RandomAccessFile effectiveIn) throws IOException
+    private byte[] arrayFromList(List<byte[]> list)
+    {
+        int totalSize = list.stream().mapToInt(array -> array.length).sum();
+
+        byte[] array = new byte[totalSize];
+
+        int position = 0;
+        for (byte[] page : list)
+        {
+            System.arraycopy(page, 0, array, position, page.length);
+
+            position += page.length;
+        }
+
+        return array;
+    }
+
+    //todo need to position effectiveIn at the beginning of the next object,
+    //which-- due to our fancy atomic append scheme-- might be the very next page
+    private List<byte[]> pageListForNextObject(RandomAccessFile effectiveIn) throws IOException
     {
         List<byte[]> delimited = allPagesForNextEntry(effectiveIn);
 
-        byte[] lastPage = delimited.get(delimited.size() - 1);
+        List<byte[]> cleaned = new ArrayList<>(delimited.size());
 
-        assert ByteBuffer.wrap(lastPage, PIPE_BUF - 4, 4).getInt() == PAGE_END_INT;
+        long sequenceNumber = -1;
+        boolean wraparound = false;
 
-        int objectDataEnd = -1;
-        for (int i = PIPE_BUF - 5; i > 17; i++)
+        for (int i = 0; i < delimited.size(); i++)
         {
-            if (lastPage[i] == OBJECT_END[3])
-                if (lastPage[i-1] == OBJECT_END[2])
-                    if (lastPage[i-2] == OBJECT_END[1])
-                        if (lastPage[i - 3] == OBJECT_END[0])
-                          objectDataEnd = i-4;
+            byte[] delimitedPage = delimited.get(i);
+
+            //all pages should begin with PAGE_BEGIN then the sequence number
+            assert ByteBuffer.wrap(delimitedPage, 0, 4).getInt() == PAGE_BEGIN_INT;
+            long thisPageSequenceNumber = ByteBuffer.wrap(delimitedPage, 4, 8).getLong();
+
+            int objectDataStart;
+
+            if (i == 0)
+            {
+                sequenceNumber = thisPageSequenceNumber;
+                assert ByteBuffer.wrap(delimitedPage, 12, 4).getInt() == OBJECT_BEGIN_INT;
+                objectDataStart = 16;
+            }
+            else
+            {
+                assert thisPageSequenceNumber == sequenceNumber;
+                objectDataStart = 12;
+            }
+
+
+            //if this isn't the last page or the second to last page we
+            // want all the data up to PAGE_END
+            int objectDataEnd = delimitedPage.length - 4;
+
+            //if this is the last or second to last page we want to know where OBJECT_END is
+            if (i >= delimited.size() - 2)
+            {
+                if (i == delimited.size() - 1 && wraparound)
+                {
+                    //todo handle validation of the last page
+                    break;
+                }
+
+                // handle the regular last page case where we have
+                // OBJECT_END zeroes, then PAGE_END
+                if (i == delimited.size() - 1)
+                {
+                    //go from the beginning of object data up to the start of PAGE_END
+                    for (int k = objectDataStart; k < delimitedPage.length - 4; k++)
+                    {
+                        if (delimitedPage[k] == OBJECT_END[0])
+                        {
+                            if (delimitedPage[k+1] == OBJECT_END[1])
+                            {
+                                if (delimitedPage[k+2] == OBJECT_END[2])
+                                {
+                                    if (delimitedPage[k+3] == OBJECT_END[3])
+                                    {
+                                        objectDataEnd = k;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                //handle the wraparound case for the second to last page
+                if (i == delimited.size() - 2)
+                {
+                    int byteNumberEncountered = -1;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (delimitedPage[delimitedPage.length - 5] == OBJECT_END[k])
+                        {
+                            byteNumberEncountered = k + 1;
+                        }
+                    }
+
+                    //wraparound case
+                    if (byteNumberEncountered != -1)
+                    {
+                        objectDataEnd = (delimitedPage.length - 4) - byteNumberEncountered;
+
+                        wraparound = true;
+                    }
+                }
+            }
+
+            byte[] cleanPage = new byte[objectDataEnd - objectDataStart];
+
+            System.arraycopy(delimitedPage, objectDataStart, cleanPage, 0, cleanPage.length);
+
+            cleaned.add(i, cleanPage);
         }
-        //the last page should have an OBJECT_END in it
-        assert objectDataEnd > 0;
-
-        // todo so at this point we should pretty much be able to
-        // figure out how big a buffer we need to allocate for
-        // the entire object
-
-        byte[] cleaned = new byte[2]; //obviously all we'll ever need is two ;)
-        //lol, just need intellij to shut up so I can do a sanity check in anther file real quick
-
-        // magic numbers are 4 bytes each so we should probably
-        // use an int here as the check variable
-        //the problem is knowing how much memory to allocate for cleaned
-        // I guess start at the back and see how many zeroes there are
-        // before PAGE_END after OBJECT_END'
-        // and after that it hould be a deterministic product of PIPE_BUF
-        // and delimited.length
-
-
-        // todo ok, so we should be able to determine the total size of the
-        // final buffer based only on the number of bytes between OBJECT_END
-        // and PAGE_END in the last page and the number of pages
-
-
 
         return cleaned;
     }
@@ -165,8 +254,17 @@ public class MergeFile implements Iterable<byte[]>
     public static final NonBlockingHashMap<Path, AtomicLong> objectCountForFile =
             new NonBlockingHashMap<>();
 
-    static AtomicLong getObjectCount(Path file)
+    /**
+     * Every time you want to write an object to a MergeFile, you just
+     * getObjectCount and then
+     * getAndAdd that guy and write out the resulting long after each
+     * PAGE_BEGIN marker for that object, that way we can keep track
+     * of which Object each page corresponds to
+     */
+    private static AtomicLong getObjectCount(Path file)
     {
+        // todo decide whether this or getMergeFileForPath's logic is better,
+        // factor out, and reuse in the other
         assert file != null;
 
         AtomicLong existing = objectCountForFile.get(file);
@@ -180,7 +278,7 @@ public class MergeFile implements Iterable<byte[]>
         return existing;
     }
 
-    static ArcCloseable<OutputStream> getWriter(Path file) throws IOException
+    private static ArcCloseable<OutputStream> getWriter(Path file) throws IOException
     {
         assert file != null;
         ArcCloseable<OutputStream> existing = writerForFile.get(file);
@@ -188,7 +286,14 @@ public class MergeFile implements Iterable<byte[]>
         //increment for the thread calling this function
         while (existing == null || !existing.incRef())
         {
-            OutputStream newWriter = Files.newOutputStream(file, StandardOpenOption.APPEND);
+            OutputStream newWriter = Files.newOutputStream
+            (
+                file,
+                StandardOpenOption.APPEND,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.SYNC
+            );
+
             ArcCloseable<OutputStream> replacement = new ArcCloseable<>(newWriter);
             //increment for map reference
             replacement.incRef();
@@ -213,7 +318,7 @@ public class MergeFile implements Iterable<byte[]>
         writer.decRef();
     }
 
-    public static void writePage(Path file, byte[] page) throws IOException
+    public static void validateAndWriteDelimitedPage(Path file, byte[] page) throws IOException
     {
         assert page.length == PIPE_BUF;
 
@@ -225,18 +330,118 @@ public class MergeFile implements Iterable<byte[]>
             // reading the beginning and end skipping the middle bit
             // is bad enough
 
-            assert page[i] == PAGE_BEGIN[i] || page[i] == OBJECT_BEGIN[i];
+            assert page[i] == PAGE_BEGIN[i];
 
             int endLessI = (PIPE_BUF) - (4 - i);
 
-            assert page[endLessI] == PAGE_END[i] || page[endLessI] == OBJECT_END[i];
+            assert page[endLessI] == PAGE_END[i];
         }
 
-        ArcCloseable<OutputStream> writer = getWriter(file);
-        writer.getBacking().write(page);
-        doneWithWriter(writer);
+        ArcCloseable<OutputStream> writer = null;
+        try
+        {
+            writer = getWriter(file);
+            writer.getBacking().write(page);
+        }finally
+        {
+            if (writer != null)
+            {
+                doneWithWriter(writer);
+            }
+        }
     }
 
+    private static final int PAGE_END_POSITION = PIPE_BUF - PAGE_END.length;
+
+    public static void writeSerializedObject(Path file, byte[] serializedObject) throws IOException
+    {
+        long sequenceNumber = getObjectCount(file).getAndIncrement();
+
+        int objectPosition = 0;
+        int objectLength = serializedObject.length;
+
+
+        int objectEndBytesWritten = 0;
+
+        while (objectEndBytesWritten != OBJECT_END.length)
+        {
+            byte[] page = new byte[PIPE_BUF];
+            int pagePosition = 0;
+
+            //PAGE_BEGIN
+            System.arraycopy(PAGE_BEGIN, 0, page, pagePosition, PAGE_BEGIN.length);
+            pagePosition += PAGE_BEGIN.length;
+
+            //sequence number
+            ByteBuffer.wrap(page, PAGE_BEGIN.length, 8).putLong(sequenceNumber);
+            pagePosition += 8;
+
+            // OBJECT_BEGIN for first page
+            if (objectPosition == 0)
+            {
+                System.arraycopy(OBJECT_BEGIN, 0, page, pagePosition, OBJECT_BEGIN.length);
+                pagePosition += OBJECT_BEGIN.length;
+            }
+
+            int remainingObjectLength = objectLength - objectPosition;
+            int remainingPageLength = PIPE_BUF - pagePosition;
+
+            int leftover = remainingPageLength - remainingObjectLength;
+
+            //we have at least one more page to go after this
+            if (leftover <= PAGE_END.length)
+            {
+                int amountToWrite = remainingPageLength - PAGE_END.length;
+                System.arraycopy(serializedObject, objectPosition, page, pagePosition, amountToWrite);
+                objectPosition += amountToWrite;
+                pagePosition += amountToWrite;
+
+                assert pagePosition == PAGE_END_POSITION;
+            }
+            //this is the last page
+            else if (leftover >= (PAGE_END.length + OBJECT_END.length))
+            {
+                System.arraycopy
+                (
+                    serializedObject,
+                    objectPosition,
+                    page,
+                    pagePosition,
+                    remainingObjectLength
+                );
+                pagePosition += remainingObjectLength;
+                objectPosition += remainingObjectLength;
+
+                int objectEndBytesToWrite = OBJECT_END.length - objectEndBytesWritten;
+
+                System.arraycopy(OBJECT_END, objectEndBytesWritten, page, pagePosition, objectEndBytesWritten);
+                pagePosition += objectEndBytesToWrite; //debugging
+                //could just assign, but this is nicer for debugging so leaving it for now
+                objectEndBytesWritten += objectEndBytesToWrite;
+            }
+            //wraparound case
+            else if (leftover > (PAGE_END.length))
+            {
+                //this one I might have to think about for a minute
+                int amountToWrite = remainingPageLength - PAGE_END.length;
+                System.arraycopy(serializedObject, objectPosition, page, pagePosition, amountToWrite);
+                //objectPosition should be serializedObject.length after this
+                objectPosition += amountToWrite;
+                pagePosition += amountToWrite;
+
+                int objectEndBytesToWrite = (PIPE_BUF - PAGE_END.length) - pagePosition;
+                System.arraycopy(OBJECT_END, 0, page, pagePosition, objectEndBytesToWrite);
+                objectEndBytesWritten += objectEndBytesToWrite;
+                pagePosition += objectEndBytesToWrite;
+
+                assert pagePosition == PAGE_END_POSITION;
+            }
+
+            System.arraycopy(PAGE_END, 0, page, PAGE_END_POSITION, PAGE_END.length);
+
+            validateAndWriteDelimitedPage(file, page);
+        }
+    }
 
 //    public static void writeSerializedObject(Path file, byte[] serializedObject) throws IOException
 //    {
@@ -308,81 +513,81 @@ public class MergeFile implements Iterable<byte[]>
 //        }
 //    }
 
-    public static void writeSerializedObject(Path file, byte[] serializedObject) throws IOException
-    {
-        byte[] page = new byte[PIPE_BUF];
-        boolean firstPage = true;
-        long objectNumber = getObjectCount(file).getAndIncrement();
-
-        System.arraycopy(PAGE_BEGIN, 0, page, 0, 4);
-        System.arraycopy(PAGE_END, 0, page, PIPE_BUF - 4, 4);
-
-        int objectBytesWritten = 0;
-
-        while (true)//todo actual control structure
-        {
-            byte[] pageType = firstPage ? OBJECT_BEGIN : OBJECT_CONTINUE;
-            System.arraycopy(pageType, 0, page, 4, 4);
-
-            //todo make sure this will actually put the long into the byte[] the way we want to
-            ByteBuffer.wrap(page, 8 , 8).putLong(objectNumber);
-
-            // ok so here we have a buffer of size PIPE_BUF with the first 16
-            // bytes filled as well as the last 4, so we have PIPE_BUF - 20 bytes
-            // available
-            int objectBytesRemaining = serializedObject.length - objectBytesWritten;
-
-
-            //todo I'm pretty sure I'm missing a case here, the
-            // one where OBJECT_END wraps around, but today was
-            // a work day so my brain is a little too fired to
-            // figure out how to check for it right now
-            // however I still stand by rewriting the version of
-            // this function I wrote in an airport bar
-
-            //if it's going to be OBJECT_END (0)* PAGE_END
-            if (objectBytesRemaining <= PIPE_BUF - 24)
-            {
-                System.arraycopy
-                (
-                    serializedObject,
-                    objectBytesWritten,
-                    page,
-                    16,
-                    objectBytesRemaining
-                );
-
-                System.arraycopy
-                (
-                    OBJECT_END,
-                    0,
-                    page,
-                    objectBytesWritten + objectBytesRemaining,
-                    4
-                );
-
-                //all done
-                objectBytesWritten = serializedObject.length;
-
-                // todo zero out bytes in between OBJECT_END and PAGE_END
-                // if necessary
-            }
-            // let's get rid of the whole magic number elision thing for now
-            // we might add it back in later, but for now I'd like to to keep
-            // the logic clearer
-            else
-            {
-                System.arraycopy(serializedObject, objectBytesWritten, page, 16, PIPE_BUF - 24);
-                System.arraycopy(OBJECT_END, 0, page, PIPE_BUF-8, 4);
-
-                objectBytesWritten += PIPE_BUF - 24;
-            }
-
-            firstPage = false;
-        }
-
-        writePage(file, page);
-    }
+//    public static void writeSerializedObject(Path file, byte[] serializedObject) throws IOException
+//    {
+//        byte[] page = new byte[PIPE_BUF];
+//        boolean firstPage = true;
+//        long objectNumber = getObjectCount(file).getAndIncrement();
+//
+//        System.arraycopy(PAGE_BEGIN, 0, page, 0, 4);
+//        System.arraycopy(PAGE_END, 0, page, PIPE_BUF - 4, 4);
+//
+//        int objectBytesWritten = 0;
+//
+//        while (true)//todo actual control structure
+//        {
+//            byte[] pageType = firstPage ? OBJECT_BEGIN : OBJECT_CONTINUE;
+//            System.arraycopy(pageType, 0, page, 4, 4);
+//
+//            //todo make sure this will actually put the long into the byte[] the way we want to
+//            ByteBuffer.wrap(page, 8 , 8).putLong(objectNumber);
+//
+//            // ok so here we have a buffer of size PIPE_BUF with the first 16
+//            // bytes filled as well as the last 4, so we have PIPE_BUF - 20 bytes
+//            // available
+//            int objectBytesRemaining = serializedObject.length - objectBytesWritten;
+//
+//
+//            //todo I'm pretty sure I'm missing a case here, the
+//            // one where OBJECT_END wraps around, but today was
+//            // a work day so my brain is a little too fired to
+//            // figure out how to check for it right now
+//            // however I still stand by rewriting the version of
+//            // this function I wrote in an airport bar
+//
+//            //if it's going to be OBJECT_END (0)* PAGE_END
+//            if (objectBytesRemaining <= PIPE_BUF - 24)
+//            {
+//                System.arraycopy
+//                (
+//                    serializedObject,
+//                    objectBytesWritten,
+//                    page,
+//                    16,
+//                    objectBytesRemaining
+//                );
+//
+//                System.arraycopy
+//                (
+//                    OBJECT_END,
+//                    0,
+//                    page,
+//                    objectBytesWritten + objectBytesRemaining,
+//                    4
+//                );
+//
+//                //all done
+//                objectBytesWritten = serializedObject.length;
+//
+//                // todo zero out bytes in between OBJECT_END and PAGE_END
+//                // if necessary
+//            }
+//            // let's get rid of the whole magic number elision thing for now
+//            // we might add it back in later, but for now I'd like to to keep
+//            // the logic clearer
+//            else
+//            {
+//                System.arraycopy(serializedObject, objectBytesWritten, page, 16, PIPE_BUF - 24);
+//                System.arraycopy(OBJECT_END, 0, page, PIPE_BUF-8, 4);
+//
+//                objectBytesWritten += PIPE_BUF - 24;
+//            }
+//
+//            firstPage = false;
+//        }
+//
+//        writePage(file, page);
+//    }
 
     private static final int PAGE_BEGIN_INT = ByteBuffer.wrap(PAGE_BEGIN).getInt();
     private static final int OBJECT_BEGIN_INT = ByteBuffer.wrap(OBJECT_BEGIN).getInt();
