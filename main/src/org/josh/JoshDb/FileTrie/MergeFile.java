@@ -384,22 +384,13 @@ public class MergeFile implements Iterable<byte[]>
             }
 
             int remainingObjectLength = objectLength - objectPosition;
-            int remainingPageLength = PIPE_BUF - pagePosition;
+            int remainingPageLength = (PIPE_BUF - PAGE_END.length) - pagePosition;
 
-            int leftover = remainingPageLength - remainingObjectLength;
+            //int leftover = remainingPageLength - remainingObjectLength;
 
-            //we have at least one more page to go after this
-            if (leftover <= PAGE_END.length)
-            {
-                int amountToWrite = remainingPageLength - PAGE_END.length;
-                System.arraycopy(serializedObject, objectPosition, page, pagePosition, amountToWrite);
-                objectPosition += amountToWrite;
-                pagePosition += amountToWrite;
 
-                assert pagePosition == PAGE_END_POSITION;
-            }
-            //this is the last page
-            else if (leftover >= (PAGE_END.length + OBJECT_END.length))
+            //write the rest of the object, then OBJECT_END
+            if (remainingObjectLength + OBJECT_END.length <= remainingPageLength)
             {
                 System.arraycopy
                 (
@@ -414,13 +405,30 @@ public class MergeFile implements Iterable<byte[]>
 
                 int objectEndBytesToWrite = OBJECT_END.length - objectEndBytesWritten;
 
-                System.arraycopy(OBJECT_END, objectEndBytesWritten, page, pagePosition, objectEndBytesWritten);
+                System.arraycopy(OBJECT_END, objectEndBytesWritten, page, pagePosition, objectEndBytesToWrite);
                 pagePosition += objectEndBytesToWrite; //debugging
                 //could just assign, but this is nicer for debugging so leaving it for now
                 objectEndBytesWritten += objectEndBytesToWrite;
             }
-            //wraparound case
-            else if (leftover > (PAGE_END.length))
+            //write the whole page up to PAGE_END
+            else if (remainingObjectLength >= remainingPageLength)
+            {
+                System.arraycopy
+                (
+                    serializedObject,
+                    objectPosition,
+                    page,
+                    pagePosition,
+                    remainingPageLength
+                );
+
+                objectPosition += remainingPageLength;
+                pagePosition += remainingPageLength;
+
+                assert pagePosition == PAGE_END_POSITION;
+            }
+            //wraparound case, write the rest of the object and then at least one byte of OBJECT_END
+            else if (remainingObjectLength < remainingPageLength)
             {
                 //this one I might have to think about for a minute
                 int amountToWrite = remainingPageLength - PAGE_END.length;
@@ -435,6 +443,11 @@ public class MergeFile implements Iterable<byte[]>
                 pagePosition += objectEndBytesToWrite;
 
                 assert pagePosition == PAGE_END_POSITION;
+            }
+            else
+            {
+                System.out.println("Something has gone terribly wrong");
+                assert false;
             }
 
             System.arraycopy(PAGE_END, 0, page, PAGE_END_POSITION, PAGE_END.length);
@@ -593,7 +606,6 @@ public class MergeFile implements Iterable<byte[]>
     private static final int OBJECT_BEGIN_INT = ByteBuffer.wrap(OBJECT_BEGIN).getInt();
     private static final int PAGE_END_INT = ByteBuffer.wrap(PAGE_END).getInt();
     private static final int OBJECT_END_INT = ByteBuffer.wrap(OBJECT_END).getInt();
-    private static final int OBJECT_CONTINUE_INT = ByteBuffer.wrap(OBJECT_CONTINUE).getInt();
 
     // todo so the idea is that after this function we just need to eliminate the
     // magic numbers and we have the byte[] for the serialized object
