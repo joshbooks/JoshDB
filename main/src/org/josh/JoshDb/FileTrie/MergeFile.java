@@ -405,7 +405,14 @@ public class MergeFile implements Iterable<byte[]>
 
                 int objectEndBytesToWrite = OBJECT_END.length - objectEndBytesWritten;
 
-                System.arraycopy(OBJECT_END, objectEndBytesWritten, page, pagePosition, objectEndBytesToWrite);
+                System.arraycopy
+                (
+                    OBJECT_END,
+                    objectEndBytesWritten,
+                    page,
+                    pagePosition,
+                    objectEndBytesToWrite
+                );
                 pagePosition += objectEndBytesToWrite; //debugging
                 //could just assign, but this is nicer for debugging so leaving it for now
                 objectEndBytesWritten += objectEndBytesToWrite;
