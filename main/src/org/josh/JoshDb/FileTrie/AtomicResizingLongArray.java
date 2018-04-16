@@ -232,31 +232,4 @@ public class AtomicResizingLongArray
 
         return retVal;
     }
-
-    private static final Constructor<UUID> privateUuidFromBytes;
-
-    static
-    {
-        Constructor<UUID> reflected = null;
-        try
-        {
-            reflected = UUID.class.getDeclaredConstructor(byte[].class);
-            reflected.setAccessible(true);
-        }
-        catch (NoSuchMethodException e)
-        {
-            e.printStackTrace();
-        }
-
-        privateUuidFromBytes = reflected;
-    }
-
-    public static UUID uuidFromByteArr(byte[] source, int offset) throws IllegalAccessException, InvocationTargetException, InstantiationException
-    {
-        ByteBuffer uuidAtOffset = ByteBuffer.wrap(source, offset, ELEMENT_LENGTH);
-
-        byte[] slice = new byte[ELEMENT_LENGTH];
-
-        return privateUuidFromBytes.newInstance(new Object[]{slice});
-    }
 }
