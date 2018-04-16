@@ -158,7 +158,7 @@ public class MergeFile implements Iterable<byte[]>
             {
                 log.warn("input file pointer was misaligned in pagePositionsForNextObject");
             }
-            long aligner = PIPE_BUF - mod;
+            long aligner = position + (PIPE_BUF - mod);
             in.seek(aligner);
             position += aligner;
         }
@@ -194,7 +194,7 @@ public class MergeFile implements Iterable<byte[]>
             long pagePosition = in.getFilePointer();
 
             //seek to objectSequenceNumber
-            in.seek(PAGE_BEGIN.length);
+            in.seek(pagePosition + PAGE_BEGIN.length);
             long objectSequenceNumber = in.readLong();
 
             if (firstIter)
@@ -255,6 +255,7 @@ public class MergeFile implements Iterable<byte[]>
 
 
 
+
     }
 
 
@@ -283,7 +284,6 @@ public class MergeFile implements Iterable<byte[]>
 
         for (int i = 0; i < candidates.size() - 1; i++)
         {
-            //todo pretty sure I've been using seek wrong up until this point, fix it
             in.seek(candidates.get(i) + PAGE_BEGIN.length + Long.BYTES);
             in.read(candidateBytes);
             if (Arrays.equals(candidateBytes, OBJECT_BEGIN))

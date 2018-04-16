@@ -15,7 +15,12 @@ public class AtomicResizingLongArray
 
     //an array of byte[]s where masterList[i].length == ELEMENT_LENGTH << i
     private volatile byte[][] masterList;
-    private AtomicReferenceFieldUpdater<AtomicResizingLongArray, byte[][]> masterListUpdater =
+    private static final AtomicReferenceFieldUpdater
+    <
+        AtomicResizingLongArray,
+        byte[][]
+    >
+    masterListUpdater =
         AtomicReferenceFieldUpdater.newUpdater
         (
             AtomicResizingLongArray.class,
