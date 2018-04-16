@@ -297,6 +297,8 @@ public class MergeFile implements Iterable<byte[]>
 
         }
 
+        //bogus return so I can run an unrelated test
+        return 1;
     }
 
 

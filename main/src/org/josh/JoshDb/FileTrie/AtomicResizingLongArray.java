@@ -99,7 +99,7 @@ public class AtomicResizingLongArray
 
         for (int i = localMax; i < requiredLength; i++)
         {
-            replacement[i] = new byte[ELEMENT_LENGTH<<(i-1)];
+            replacement[i] = new byte[ELEMENT_LENGTH<<(i)];
         }
 
         if (!masterListUpdater.compareAndSet(this, masterList, replacement))
@@ -108,7 +108,7 @@ public class AtomicResizingLongArray
         }
     }
 
-    AtomicResizingLongArray()
+    public AtomicResizingLongArray()
     {
         masterList = new byte[1][];
         masterList[0] = new byte[ELEMENT_LENGTH];
@@ -144,10 +144,10 @@ public class AtomicResizingLongArray
                     startOffset = offset - overallOffsetOfCurrentArray;
                 }
 
-                int bytesToRead =
+                int bytesToWrite =
                     Math.min
                     (
-                        lengthOfCurrentArray-startOffset,
+                        lengthOfCurrentArray - startOffset,
                         contents.length - writeBufferPosition
                     );
 
@@ -157,10 +157,10 @@ public class AtomicResizingLongArray
                     writeBufferPosition,
                     masterList[i],
                     startOffset,
-                    bytesToRead
+                    bytesToWrite
                 );
 
-                writeBufferPosition += bytesToRead;
+                writeBufferPosition += bytesToWrite;
             }
 
             //are we done reading?
