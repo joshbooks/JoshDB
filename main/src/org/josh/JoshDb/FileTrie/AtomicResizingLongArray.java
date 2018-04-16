@@ -7,18 +7,18 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
-public class AtomicResizingUuidArray
+public class AtomicResizingLongArray
 {
 
     //64*2/8 = 128/8 =
-    private static final int UUID_LENGTH = 16;
+    private static final int ELEMENT_LENGTH = 8;
 
-    //an array of byte[]s where masterList[i].length == 16<<i
+    //an array of byte[]s where masterList[i].length == ELEMENT_LENGTH << i
     private volatile byte[][] masterList;
-    private AtomicReferenceFieldUpdater<AtomicResizingUuidArray, byte[][]> masterListUpdater =
+    private AtomicReferenceFieldUpdater<AtomicResizingLongArray, byte[][]> masterListUpdater =
         AtomicReferenceFieldUpdater.newUpdater
         (
-            AtomicResizingUuidArray.class,
+            AtomicResizingLongArray.class,
             byte[][].class,
             "masterList"
         );
@@ -28,7 +28,7 @@ public class AtomicResizingUuidArray
         int deepLength = 0;
         for (int i = 0; i < shallowLength; i++)
         {
-            deepLength += 16 << (i-1);
+            deepLength += ELEMENT_LENGTH << (i - 1);
         }
 
         return deepLength;
@@ -94,7 +94,7 @@ public class AtomicResizingUuidArray
 
         for (int i = localMax; i < requiredLength; i++)
         {
-            replacement[i] = new byte[16<<(i-1)];
+            replacement[i] = new byte[ELEMENT_LENGTH<<(i-1)];
         }
 
         if (!masterListUpdater.compareAndSet(this, masterList, replacement))
@@ -103,10 +103,10 @@ public class AtomicResizingUuidArray
         }
     }
 
-    AtomicResizingUuidArray()
+    AtomicResizingLongArray()
     {
         masterList = new byte[1][];
-        masterList[0] = new byte[UUID_LENGTH];
+        masterList[0] = new byte[ELEMENT_LENGTH];
         maxRequestedShallowLength = new AtomicInteger(1);
     }
 
@@ -118,7 +118,7 @@ public class AtomicResizingUuidArray
         int overallOffsetOfCurrentArray = 0;
         for (int i = 0; i < masterList.length; i++)
         {
-            int lengthOfCurrentArray = 16<<i;
+            int lengthOfCurrentArray = ELEMENT_LENGTH << i;
             int overallEndPositionOfCurrentArray =
                 overallOffsetOfCurrentArray
                 +
@@ -176,7 +176,7 @@ public class AtomicResizingUuidArray
         int overallOffsetOfCurrentArray = 0;
         for (int i = 0; i < masterList.length; i++)
         {
-            int lengthOfCurrentArray = 16<<i;
+            int lengthOfCurrentArray = ELEMENT_LENGTH << i;
             int overallEndPositionOfCurrentArray =
                 overallOffsetOfCurrentArray
                 +
@@ -248,9 +248,9 @@ public class AtomicResizingUuidArray
 
     public static UUID uuidFromByteArr(byte[] source, int offset) throws IllegalAccessException, InvocationTargetException, InstantiationException
     {
-        ByteBuffer uuidAtOffset = ByteBuffer.wrap(source, offset, UUID_LENGTH);
+        ByteBuffer uuidAtOffset = ByteBuffer.wrap(source, offset, ELEMENT_LENGTH);
 
-        byte[] slice = new byte[UUID_LENGTH];
+        byte[] slice = new byte[ELEMENT_LENGTH];
 
         return privateUuidFromBytes.newInstance(new Object[]{slice});
     }
