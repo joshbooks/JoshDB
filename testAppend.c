@@ -83,7 +83,7 @@ int main(int argc, char **argv)
 		char threadChar = ((char *)readBuffer)[i];
 		for (int j = 1; j < readReturn; j++)
 		{
-			if (((char*)readBuffer)[j] != threadChar)
+			if (((char*)readBuffer)[i+j] != threadChar)
 			{
 				printf("found an inconsistency");
 			}
