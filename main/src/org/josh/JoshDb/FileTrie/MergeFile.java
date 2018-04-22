@@ -1,6 +1,5 @@
 package org.josh.JoshDb.FileTrie;
 
-import org.cliffc.high_scale_lib.Counter;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.josh.JoshDb.ArcCloseable;
 import org.slf4j.LoggerFactory;
@@ -45,6 +44,7 @@ public class MergeFile implements Iterable<byte[]>
     public static final byte[] PAGE_END = new byte[]{'z', '/', 'o', 's'};
 
     private final Path file;
+    private final AtomicResizingLongArray sequenceArray;
 
     // todo it seems like instantiation is pretty much just done to implement iterator
     // maybe that should be split into a different class??
@@ -67,9 +67,28 @@ public class MergeFile implements Iterable<byte[]>
         return shared;
     }
 
+    private static final NonBlockingHashMap<Path, AtomicResizingLongArray> pathToSequenceArray =
+            new NonBlockingHashMap<>();
+
+    public static AtomicResizingLongArray sequenceArrayForPath(Path path)
+    {
+        AtomicResizingLongArray temp = new AtomicResizingLongArray();
+
+        AtomicResizingLongArray shared = pathToSequenceArray.putIfAbsent(path, temp);
+
+        if (shared == null)
+        {
+            shared = temp;
+        }
+
+        return shared;
+    }
+
+
     private MergeFile(Path file)
     {
         this.file = file;
+        this.sequenceArray = sequenceArrayForPath(file);
     }
 
     @Override
@@ -248,19 +267,99 @@ public class MergeFile implements Iterable<byte[]>
         return numBytes;
     }
 
+    NonBlockingHashMap<Long, long[]> sequenceNumberToOffsets =
+            new NonBlockingHashMap<>();
 
-    void theThingIWantToDo(RandomAccessFile in) throws IOException
+    public byte[] getObject(long objectSequenceNumber) throws IOException, InterruptedException
     {
-        assert in.getFilePointer() % PIPE_BUF == 0;
+        RandomAccessFile in = new RandomAccessFile(file.toFile(), "r");
 
+        long[] offsets = sequenceNumberToOffsets.get(objectSequenceNumber);
 
+        if (offsets == null)
+        {
+            //I hate this boxing, does trove have a list?
+            ArrayList<Long> offsetList = new ArrayList<>();
 
+            int arrayLength = (int) (in.length() / PIPE_BUF);
 
+            for (int i = 0; i < arrayLength; i++)
+            {
+                long sequenceNumber = sequenceArray.get(i);
+                // todo this means I have to treat index 0 specially or not use it
+                if (sequenceNumber < 0)
+                {
+                    in.seek(i * PIPE_BUF);
+                    sequenceNumber = sequenceNumberOfPage(in);
+                    sequenceArray.set(i, sequenceNumber);
+                }
+
+                // todo bit of a shame to waste the calculation for other sequence
+                // number offset relationships, but I'd really rather not memoize with
+                // ArrayLists
+                if (sequenceNumber != objectSequenceNumber)
+                {
+                    continue;
+                }
+
+                offsetList.add((in.getFilePointer() / PIPE_BUF) * PIPE_BUF);
+            }
+
+            offsets = new long[offsetList.size()];
+            int index = 0;
+            for (long i : offsetList)
+            {
+                offsets[index] = i;
+            }
+
+            if (offsets.length == 0)
+            {
+                throw new IOException("Tried to read an object that doesn't exist yet");
+            }
+
+            sequenceNumberToOffsets.put(objectSequenceNumber, offsets);
+        }
+
+        if (offsets.length == 0)
+        {
+            throw new IOException("tried to get an object that hasn't been written yet");
+        }
+
+        in.seek(offsets[0]);
+
+        // todo I know it's terrible. we have all the offsets and then
+        // just use one, I didn't know we would have all this
+        // information when I wrote the other function, will revise
+        List<byte[]> pages = pageListForNextObject(in);
+
+        int totalLength = pages.stream().mapToInt(page -> page.length).sum();
+
+        byte[] serializedObject = new byte[totalLength];
+        int readBufferHead = 0;
+
+        for (byte[] page : pages)
+        {
+            System.arraycopy(page, 0, serializedObject, readBufferHead, page.length);
+            readBufferHead += page.length;
+        }
+
+        return serializedObject;
     }
 
 
+    long sequenceNumberOfPage(RandomAccessFile in) throws IOException, InterruptedException
+    {
+        long position = in.getFilePointer();
+        assert position % PIPE_BUF == 0;
 
+        in.seek(position + PAGE_BEGIN.length);
 
+        long objectSequenceNumber = in.readLong();
+
+        sequenceArray.set((int) position / PIPE_BUF, objectSequenceNumber);
+
+        return objectSequenceNumber;
+    }
 
     long offsetForNextObject(List<Long> offsetsForPreviousObject, RandomAccessFile in) throws IOException
     {
@@ -443,13 +542,7 @@ public class MergeFile implements Iterable<byte[]>
         //increment for the thread calling this function
         while (existing == null || !existing.incRef())
         {
-            OutputStream newWriter = Files.newOutputStream
-            (
-                file,
-                StandardOpenOption.APPEND,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.SYNC
-            );
+            OutputStream newWriter = createWriter(file);
 
             ArcCloseable<OutputStream> replacement = new ArcCloseable<>(newWriter);
             //increment for map reference
@@ -468,6 +561,18 @@ public class MergeFile implements Iterable<byte[]>
         }
 
         return existing;
+    }
+
+    private static OutputStream createWriter(Path file) throws IOException
+    {
+        return Files.newOutputStream
+        (
+            file,
+            StandardOpenOption.APPEND,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.SYNC,
+            StandardOpenOption.DSYNC
+        );
     }
 
     public static void doneWithWriter(ArcCloseable<OutputStream> writer)
@@ -494,23 +599,29 @@ public class MergeFile implements Iterable<byte[]>
             assert page[endLessI] == PAGE_END[i];
         }
 
-        ArcCloseable<OutputStream> writer = null;
-        try
-        {
-            writer = getWriter(file);
-            writer.getBacking().write(page);
-        }finally
-        {
-            if (writer != null)
-            {
-                doneWithWriter(writer);
-            }
-        }
+//        ArcCloseable<OutputStream> writer = null;
+//        try
+//        {
+//            writer = getWriter(file);
+//            writer.getBacking().write(page);
+//            writer.getBacking().flush();//this shouldn't be necessary
+//
+//        }finally
+//        {
+//            if (writer != null)
+//            {
+//                doneWithWriter(writer);
+//            }
+//        }
+        OutputStream writer = createWriter(file);
+        writer.write(page);
+        writer.flush();
+        writer.close();
     }
 
     private static final int PAGE_END_POSITION = PIPE_BUF - PAGE_END.length;
 
-    public static void writeSerializedObject(Path file, byte[] serializedObject) throws IOException
+    public static long writeSerializedObject(Path file, byte[] serializedObject) throws IOException
     {
         long sequenceNumber = getObjectCount(file).getAndIncrement();
 
@@ -618,6 +729,8 @@ public class MergeFile implements Iterable<byte[]>
 
             validateAndWriteDelimitedPage(file, page);
         }
+
+        return sequenceNumber;
     }
 
     private static final int PAGE_BEGIN_INT = ByteBuffer.wrap(PAGE_BEGIN).getInt();
@@ -663,10 +776,13 @@ public class MergeFile implements Iterable<byte[]>
         assert ByteBuffer.wrap(nextPage, 0, 4).getInt() == PAGE_BEGIN_INT;
         // in should always be pointing to the page at the beginning of an
         // object when passed to this function
-        assert ByteBuffer.wrap(nextPage, 4, 4).getInt() == OBJECT_BEGIN_INT;
+
+        boolean fail = ByteBuffer.wrap(nextPage, 12, 4).getInt() == OBJECT_BEGIN_INT;
+
+        assert fail;
         assert ByteBuffer.wrap(nextPage, (PIPE_BUF - 4), 4).getInt() == PAGE_END_INT;
 
-        long objectCountNumber = ByteBuffer.wrap(nextPage, 8, 8).getLong();
+        long objectCountNumber = ByteBuffer.wrap(nextPage, 4, 8).getLong();
 
         objectPages.add(nextPage);
 
@@ -694,16 +810,14 @@ public class MergeFile implements Iterable<byte[]>
 
             if (bytesRead < PIPE_BUF)
             {
-                throw new IOException("Exhausted InputStream");
+                System.out.println(("Exhausted InputStream"));
+                break;
             }
 
             assert PAGE_BEGIN_INT == ByteBuffer.wrap(nextPage, 0, 4).getInt();
 
             //todo assert page ends with PAGE_END
 
-            // todo might have to waste another 4 bytes after PAGE_BEGIN
-            // to avoid collisions between the top 4 bytes of
-            // objectCountNumber and OBJECT_BEGIN
             boolean sameObjectCountNumber =
                     objectCountNumber
                     ==
@@ -722,6 +836,7 @@ public class MergeFile implements Iterable<byte[]>
 
             objectPages.add(nextPage);
 
+            //TODO this is a problem, need to handle the wraparound case
             lastPage =
                 ByteBuffer
                     .wrap(nextPage, (PIPE_BUF - 8), 4)

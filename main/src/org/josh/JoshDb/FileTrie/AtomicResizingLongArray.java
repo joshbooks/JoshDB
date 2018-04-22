@@ -3,6 +3,7 @@ package org.josh.JoshDb.FileTrie;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
@@ -99,9 +100,15 @@ public class AtomicResizingLongArray
 
         for (int i = localMax; i < requiredLength; i++)
         {
-            replacement[i] = new byte[ELEMENT_LENGTH<<(i)];
+            replacement[i] = new byte[ELEMENT_LENGTH << i];
+
+            for (int j = 0; j < replacement[i].length; j += 8)
+            {
+                ByteBuffer.wrap(replacement[i], j, 8).putLong(-1);
+            }
         }
 
+        //todo once I have enough tests in place this should just be an atomic set
         if (!masterListUpdater.compareAndSet(this, masterList, replacement))
         {
             throw new InterruptedException("Something has gone terribly wrong");
@@ -112,13 +119,27 @@ public class AtomicResizingLongArray
     {
         masterList = new byte[1][];
         masterList[0] = new byte[ELEMENT_LENGTH];
+        //invalid get returns -1
+        ByteBuffer.wrap(masterList[0]).putLong(-1);
         maxRequestedShallowLength = new AtomicInteger(1);
+    }
+
+    public long get(int index)
+    {
+        return ByteBuffer.wrap(get(index * ELEMENT_LENGTH, ELEMENT_LENGTH)).getLong();
+    }
+
+    public void set(int index, long contents) throws InterruptedException
+    {
+        set(index * ELEMENT_LENGTH, ByteBuffer.allocate(8).putLong(contents).array());
     }
 
     public void set(int offset, byte[] contents) throws InterruptedException
     {
         ensureMasterListLongEnough(offset + contents.length);
 
+        // todo I'm positive this could be made more efficient and simpler with
+        // some fancy power of two math but this'll do for now
         int writeBufferPosition = 0;
         int overallOffsetOfCurrentArray = 0;
         for (int i = 0; i < masterList.length; i++)
@@ -130,7 +151,7 @@ public class AtomicResizingLongArray
                 lengthOfCurrentArray
                 ;
 
-            //do we have anything to read in this subarray?
+            //do we have anything to write in this subarray?
             if (overallEndPositionOfCurrentArray > offset)
             {
                 int startOffset;
@@ -163,7 +184,7 @@ public class AtomicResizingLongArray
                 writeBufferPosition += bytesToWrite;
             }
 
-            //are we done reading?
+            //are we done writing?
             if (overallEndPositionOfCurrentArray >= offset + contents.length)
             {
                 break;
@@ -176,6 +197,11 @@ public class AtomicResizingLongArray
     public byte[] get(int offset, int length)
     {
         byte[] retVal = new byte[length];
+
+        for (int i = 0; i < retVal.length; i += 8)
+        {
+            ByteBuffer.wrap(retVal, i, 8).putLong(-1);
+        }
 
         int readBufferPosition = 0;
         int overallOffsetOfCurrentArray = 0;
