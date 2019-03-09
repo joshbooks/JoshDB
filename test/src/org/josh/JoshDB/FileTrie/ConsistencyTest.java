@@ -12,7 +12,7 @@ import java.util.Random;
 
 public class ConsistencyTest
 {
-    private static final Path testLocus = Paths.get("./consistencytestFile");
+    private static final Path testLocus = Paths.get("./consistencyTestFile");
     private static final Path testBufferPath = Paths.get("./testBuffer");
     private static final byte[] testBuffer = new byte[324];
     private static final Object testBufferLock = new Object();
