@@ -1,7 +1,5 @@
 package org.josh.JoshDB;
 
-import org.josh.JoshDb.RemoteNode;
-import org.josh.JoshDb.RemoteNodeStore;
 import org.testng.annotations.Test;
 
 import java.io.IOException;

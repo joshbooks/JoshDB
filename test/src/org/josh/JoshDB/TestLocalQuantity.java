@@ -1,6 +1,5 @@
 package org.josh.JoshDB;
 
-import org.josh.JoshDb.LocalQuantity;
 import org.testng.annotations.Test;
 
 import java.util.Random;
