@@ -26,7 +26,9 @@ public class MergeFile implements Iterable<byte[]>
         catch (UnsatisfiedLinkError e)
         {
             // TODO I guess NativeUtils is going to be the best way to
-            // load a jni lib from a jar
+            // load a jni lib from a jar, then have System.load as a fallback
+            // for testing. A static block with that logic seems like something
+            // that could be automagically inserted with a bach script :D
             System.out.println("Couldn't load native lib");
             System.exit(1);
         }

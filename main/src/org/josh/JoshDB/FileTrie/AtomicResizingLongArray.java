@@ -1,71 +1,119 @@
 package org.josh.JoshDB.FileTrie;
 
-import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
+/**
+ * @author Josh Hight
+ *
+ * So the way MergeFile works is by writing furiously to the end of the file
+ * and then building up the structure of the file when reading. So we need
+ * a data structure that we can use to keep track of where all the various
+ * chunks of object are.
+ *
+ * We have the guarantee that once something is written
+ * to a MergeFile it will never change. We might write it out to a different
+ * MergeFile, but it's place in the current MergeFile will never change.
+ *
+ * So what we need is a data stucture a bit like a list in that it can be
+ * dynamically resized. But unlike a list, it need never shrink and writes to
+ * a given offset will walways contain identical data.
+ *
+ * In the spirit of JoshDB we'll make it totally nonblocking, and the core
+ * systemsy bits should be really efficient, but the mathy bits are kinda
+ * whatever, we can always go back and optimize them if we ever feel like it
+ * or if a profiler ever tells us that they're actually a problem.
+ */
 public class AtomicResizingLongArray
 {
-
-    //64*2/8 = 128/8 =
-    private static final int ELEMENT_LENGTH = 8;
-
-    //an array of byte[]s where masterList[i].length == ELEMENT_LENGTH << i
-    private volatile byte[][] masterList;
+    private volatile long[][] masterList;
+    // atomic updater for the master list, we use this instead of an
+    // AtomicReference, because we don't always need to access the masterList
+    // atomically
     private static final AtomicReferenceFieldUpdater
     <
         AtomicResizingLongArray,
-        byte[][]
+        long[][]
     >
     masterListUpdater =
         AtomicReferenceFieldUpdater.newUpdater
         (
             AtomicResizingLongArray.class,
-            byte[][].class,
+            long[][].class,
             "masterList"
         );
 
+    // OK, so last time I kind of fucking eyeballed the resizing and addressing.
+    // That's not great, since the idea is to IMPROVE performance over the vanilla
+    // implementation. How do we do this? By ensuring that the size/address
+    // calculations can all be accomplished efficiently with constant time
+    // shifting and masking. So how should we do this?
+    // 000 -> 0,    1,
+    // 001 -> 10,   11
+    // 010 -> 100,  101,  110,  111
+    // 111 -> 1000, 1001, 1010, 1011, 1100, 1101, 1110, 1111
+    
+    private static final int INT_BITS = Integer.BYTES * 8;
+
     /**
-     * Mostly for testing purposes, returns "current" deep length
+     * Given
+     * @param subArrayNumber the index of a subArray in masterList
+     * @return The length of that subArray
      */
-    public int currentLengthEstimate()
+    private int sizeOfSubArray(int subArrayNumber)
     {
-        return masterListDeepLength(masterList == null ? 0 : masterList.length);
+        return (2 << subArrayNumber);
     }
 
-    private int masterListDeepLength(int shallowLength)
+    /**
+     * Returns the highest set bit of an integer, from 0 to 31
+     * Also returns 0 when passed 0
+     * @param value
+     * @return
+     */
+    private int highestSetBit(int value)
     {
-        int deepLength = 0;
-        for (int i = 0; i < shallowLength; i++)
+        int highestBit = 0;
+        // I really don't feel like unrolling this loop, is that something javac takes care of
+        // or might we need a code generation step?
+        for (int i = 0; i < INT_BITS; i++)
         {
-            deepLength += ELEMENT_LENGTH << (i - 1);
+            int mask = 1 << i;
+
+            if ((mask & value) != 0)
+            {
+                highestBit = i;
+            }
         }
 
-        return deepLength;
+        return highestBit;
     }
 
-    // I'm positive some fancy masky shifty stuff would be more efficient here,
-    // but it's way too early to start optimizing shit like that
+    /**
+     *
+     * @param offset 1 based offset (yes, you just add 1)
+     * @return the shallow length required
+     */
     private int shallowLengthRequiredForOffset(int offset)
     {
-        int accepted = 1;
-        for (int proposed = 1; masterListDeepLength(proposed) < offset; proposed++)
-        {
-            accepted = proposed;
-        }
-
-        return accepted;
+        return highestSetBit(offset) + 1;
     }
+
 
     private final AtomicInteger maxRequestedShallowLength;
 
     /**
-     * Ensure that the deep length of masterList is
-     * at least enough to satisfy a get at requiredOffset
+     * Ensure that the deep length of masterList is at least enough to satisfy
+     * a get/set at requiredOffset
+     * @param requiredOffset The 1 based offset that we are going to address to
+     *                      and therefore need to ensure has a home
      */
     void ensureMasterListLongEnough(int requiredOffset)
     {
         int requiredLength = shallowLengthRequiredForOffset(requiredOffset);
+
+        if (masterList.length >= requiredLength) return;
+
         int localMax = maxRequestedShallowLength.get();
 
         boolean didSucceed = false;
@@ -101,8 +149,8 @@ public class AtomicResizingLongArray
         // to do that we want to atomically swap out the master
         // list in case any other requests have the same required
         // length
-        byte[][] replacement = new byte[requiredLength][];
-        byte[][] localMaster;
+        long[][] replacement = new long[requiredLength][];
+        long[][] localMaster;
         do
         {
             localMaster = masterListUpdater.get(this);
@@ -114,12 +162,9 @@ public class AtomicResizingLongArray
 
             for (int i = localMax; i < requiredLength; i++)
             {
-                replacement[i] = new byte[ELEMENT_LENGTH << i];
+                int sizeForArray = sizeOfSubArray(i);
 
-                for (int j = 0; j < replacement[i].length; j += 8)
-                {
-                    ByteBuffer.wrap(replacement[i], j, 8).putLong(-1);
-                }
+                replacement[i] = new long[sizeForArray];
             }
         }
         while
@@ -132,145 +177,23 @@ public class AtomicResizingLongArray
 
     public AtomicResizingLongArray()
     {
-        masterList = new byte[1][];
-        masterList[0] = new byte[ELEMENT_LENGTH];
-        //invalid get returns -1
-        ByteBuffer.wrap(masterList[0]).putLong(-1);
+        masterList = new long[1][];
+        masterList[0] = new long[2];
         maxRequestedShallowLength = new AtomicInteger(1);
     }
 
     public long get(int index)
     {
-        return ByteBuffer.wrap(get(index * ELEMENT_LENGTH, ELEMENT_LENGTH)).getLong();
+        int highestBit = highestSetBit(index);
+        int subIndex = index == 0 ? 0 : index ^ highestBit;
+        return masterList[highestBit][subIndex];
     }
 
     public void set(int index, long contents)
     {
-        set(index * ELEMENT_LENGTH, ByteBuffer.allocate(8).putLong(contents).array());
-    }
-
-    public void set(int offset, byte[] contents)
-    {
-        ensureMasterListLongEnough(offset + contents.length);
-
-        // todo I'm positive this could be made more efficient and simpler with
-        // some fancy power of two math but this'll do for now
-        int writeBufferPosition = 0;
-        int overallOffsetOfCurrentArray = 0;
-        for (int i = 0; i < masterList.length; i++)
-        {
-//            int lengthOfCurrentArray = ELEMENT_LENGTH << i;
-            int lengthOfCurrentArray = masterList[i].length;
-            int overallEndPositionOfCurrentArray =
-                overallOffsetOfCurrentArray
-                +
-                lengthOfCurrentArray;
-
-            //do we have anything to write in this subarray?
-            if (overallEndPositionOfCurrentArray > offset && overallOffsetOfCurrentArray <= offset)
-            {
-                int startOffset;
-
-                if (overallOffsetOfCurrentArray > offset)
-                {
-                    startOffset = 0;
-                }
-                else
-                {
-                    startOffset = offset - overallOffsetOfCurrentArray;
-                }
-
-                int bytesToWrite =
-                    Math.min
-                    (
-                        lengthOfCurrentArray - startOffset,
-                        contents.length - writeBufferPosition
-                    );
-
-                System.arraycopy
-                (
-                    contents,
-                    writeBufferPosition,
-                    masterList[i],
-                    startOffset,
-                    bytesToWrite
-                );
-
-                writeBufferPosition += bytesToWrite;
-            }
-
-            //are we done writing?
-            if (overallEndPositionOfCurrentArray >= offset + contents.length)
-            {
-                break;
-            }
-
-            overallOffsetOfCurrentArray += lengthOfCurrentArray;
-        }
-    }
-
-    public byte[] get(int offset, int length)
-    {
-        byte[] retVal = new byte[length];
-
-        for (int i = 0; i < retVal.length; i += 8)
-        {
-            ByteBuffer.wrap(retVal, i, 8).putLong(-1);
-        }
-
-        int readBufferPosition = 0;
-        int overallOffsetOfCurrentArray = 0;
-        for (int i = 0; i < masterList.length; i++)
-        {
-            int lengthOfCurrentArray = ELEMENT_LENGTH << i;
-            int overallEndPositionOfCurrentArray =
-                overallOffsetOfCurrentArray
-                +
-                lengthOfCurrentArray
-                ;
-
-            //do we have anything to read in this subarray?
-            if (overallEndPositionOfCurrentArray > offset)
-            {
-                int startOffset;
-
-                if (overallOffsetOfCurrentArray > offset)
-                {
-                    startOffset = 0;
-                }
-                else
-                {
-                    startOffset = offset - overallOffsetOfCurrentArray;
-                }
-
-                int bytesToRead =
-                    Math.min
-                    (
-                        lengthOfCurrentArray-startOffset,
-                        length - readBufferPosition
-                    );
-
-                System.arraycopy
-                (
-                    masterList[i],
-                    startOffset,
-                    retVal,
-                    readBufferPosition,
-                    bytesToRead
-                );
-
-                readBufferPosition += bytesToRead;
-            }
-
-            //are we done reading?
-            if (overallEndPositionOfCurrentArray >= offset + length)
-            {
-                break;
-            }
-
-            overallOffsetOfCurrentArray += lengthOfCurrentArray;
-        }
-
-        return retVal;
+        ensureMasterListLongEnough(index);
+        int highestBit = highestSetBit(index);
+        int subIndex = index == 0 ? 0 : index ^ highestBit;
+        masterList[highestBit][subIndex] = contents;
     }
 }

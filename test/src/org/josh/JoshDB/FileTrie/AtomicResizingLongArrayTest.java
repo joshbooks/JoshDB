@@ -3,107 +3,79 @@ package org.josh.JoshDB.FileTrie;
 import org.junit.Test;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class AtomicResizingLongArrayTest
 {
-
-    @Test
-    public void testSizeIncrementation()
-    {
-        AtomicResizingLongArray incrementingThing = new AtomicResizingLongArray();
-
-        assert incrementingThing.currentLengthEstimate() == 0;
-
-        incrementingThing.set(2, 5);
-
-        System.out.println("length is now " + incrementingThing.currentLengthEstimate());
-
-        assert incrementingThing.currentLengthEstimate() == 8;
-    }
-
     @Test
     public void testValuePreservation()
     {
         AtomicResizingLongArray testThing = new AtomicResizingLongArray();
 
-        for (int i = 1; i < 1337; i++)
+        for (int i = 0; i < 1337; i++)
         {
-            testThing.set(i - 1, i);
+            testThing.set(i, (i * (Long.MAX_VALUE >> 4)));
         }
 
-        for (int i = 1; i < 1337; i++)
+        for (int i = 0; i < 1337; i++)
         {
-            assert testThing.get(i - 1) == i;
-        }
-    }
-
-    @Test
-    public void testAddUp()
-    {
-        AtomicResizingLongArray array = new AtomicResizingLongArray();
-
-        for (int i = 0; i < 0x300; i += 8)
-        {
-            array.set(i, ByteBuffer.allocate(8).putLong(i).array());
-            if (array.get(i/8) != i)
-            {
-                System.out.println(i/8 + " was not equal to " + array.get(i/8));
-            }
-        }
-
-        for (int i = 0; i < 0x300; i += 8)
-        {
-            assert ByteBuffer.wrap(array.get(i, 8)).getLong() == i;
+            assert testThing.get(i) == (i * (Long.MAX_VALUE >> 4));
         }
     }
 
+
+    /**
+     * This test serves no real, purpose, you may notice it has no asserts,
+     * bu it does a fantastic job of boosting my ego and demonstrating that
+     * if you grow aggressively you can write a thread safe collectiony thing
+     * that's faster than an ArrayList for some workloads
+     */
     @Test
-    public void testAddUpMultiThreaded() throws InterruptedException
+    public void testRelativeSpeed()
     {
-        AtomicResizingLongArray array = new AtomicResizingLongArray();
-        Thread[] testThreads = new Thread[0x200];
-        AtomicInteger threadNum = new AtomicInteger(0);
+        long myStartTime = System.nanoTime();
 
-        for (int i = 0; i < 0x200; i += 8)
+        AtomicResizingLongArray testThing = new AtomicResizingLongArray();
+
+        for (int i = 0; i < 31337; i++)
         {
-//            final int finalI = i;
-            testThreads[i] =
-                new Thread
-                (
-                    () ->
-                    {
-                        int finalI = threadNum.getAndAdd(8);
-                        System.out.println("thread " + Thread.currentThread().getName() + " got " + finalI);
-                        for (int j = 0; j < 0x100; j++)
-                        {
-                            int currentValue = ( finalI * 0x100 ) + j;
-                            array.set(currentValue * 8, ByteBuffer.allocate(8).putLong(finalI).array());
-                        }
-                    }
-                );
-
-            testThreads[i].start();
+            testThing.set(i, (i * (Long.MAX_VALUE >> 4)));
         }
 
-        for (int i = 0; i < 0x200; i += 8)
+        for (int i = 0; i < 31337; i++)
         {
-            testThreads[i].join();
-        }
-
-        for (int i = 0; i < 0x200; i += 8)
-        {
-            System.out.println(i);
-            for (int j = 0; j < 0x100; j++)
+            if (testThing.get(i) != (i * (Long.MAX_VALUE >> 4)))
             {
-                int currentValue = (( i * 0x100 ) + j) * 8;
-                if (ByteBuffer.wrap(array.get(currentValue, 8)).getLong() != i)
-                {
-                    System.out.println(i + " was not equal to " + ByteBuffer.wrap(array.get(currentValue, 8)).getLong());
-                }
-//                assert ByteBuffer.wrap(array.get(currrentValue, 8)).getLong() == i;
+                System.out.println("Failed on " + i);
+                assert false;
             }
         }
+
+        long myEndTime = System.nanoTime();
+        long myTime = myEndTime - myStartTime;
+
+        long libStartTime = System.nanoTime();
+        ArrayList<Long> libTestThing = new ArrayList<>();
+        for (int i = 0; i < 0x1000000; i++)
+        {
+            libTestThing.ensureCapacity(i - 1);
+            while (libTestThing.size() <= i)
+            {
+                libTestThing.add(0L);
+            }
+            libTestThing.set(i, (i * (Long.MAX_VALUE >> 4)));
+        }
+
+        for (int i = 0; i < 0x1000000; i++)
+        {
+            assert libTestThing.get(i) == (i * (Long.MAX_VALUE >> 4));
+        }
+        long libEndTime = System.nanoTime();
+        long libTime = libEndTime - libStartTime;
+
+        System.out.println("The time for my library was                " + myTime);
+        System.out.println("The time for the standard java library was " + libTime);
     }
 
     @Test
