@@ -1,5 +1,6 @@
 package org.josh.JoshDB.FileTrie;
 
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
@@ -28,7 +29,7 @@ public class AtomicResizingLongArray
 {
     private volatile long[][] masterList;
     // atomic updater for the master list, we use this instead of an
-    // AtomicReference, because we don't always need to access the masterList
+    // AtomicReference because we don't always need to access the masterList
     // atomically
     private static final AtomicReferenceFieldUpdater
     <
@@ -52,7 +53,7 @@ public class AtomicResizingLongArray
     // 001 -> 10,   11
     // 010 -> 100,  101,  110,  111
     // 111 -> 1000, 1001, 1010, 1011, 1100, 1101, 1110, 1111
-    
+
     private static final int INT_BITS = Integer.BYTES * 8;
 
     /**
@@ -117,7 +118,7 @@ public class AtomicResizingLongArray
         int localMax = maxRequestedShallowLength.get();
 
         boolean didSucceed = false;
-        //set localMax to the deep Array Length we'll have after resizing
+        // set localMax to the deep Array Length we'll have after resizing
         while (localMax < requiredLength)
         {
             didSucceed = maxRequestedShallowLength.compareAndSet(localMax, requiredLength);
@@ -145,7 +146,7 @@ public class AtomicResizingLongArray
         while (masterList.length < localMax);
 
 
-        //then add our chunks
+        // then add our chunks
         // to do that we want to atomically swap out the master
         // list in case any other requests have the same required
         // length
@@ -164,7 +165,11 @@ public class AtomicResizingLongArray
             {
                 int sizeForArray = sizeOfSubArray(i);
 
-                replacement[i] = new long[sizeForArray];
+                long[] subArrayReplacement = new long[sizeForArray];
+                Arrays.fill(subArrayReplacement, -1);
+
+                //replacement[i] = new long[sizeForArray];
+                replacement[i] = subArrayReplacement;
             }
         }
         while
@@ -186,7 +191,14 @@ public class AtomicResizingLongArray
     {
         int highestBit = highestSetBit(index);
         int subIndex = index == 0 ? 0 : index ^ highestBit;
-        return masterList[highestBit][subIndex];
+        try
+        {
+            return masterList[highestBit][subIndex];
+        }
+        catch (ArrayIndexOutOfBoundsException e)
+        {
+            return -2;
+        }
     }
 
     public void set(int index, long contents)

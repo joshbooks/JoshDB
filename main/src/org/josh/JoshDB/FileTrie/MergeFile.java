@@ -73,8 +73,9 @@ public class MergeFile implements Iterable<byte[]>
     private static native long appendToFile(long fd, byte[] bytes, long numBytes);
 
     // could do this in native code but like nah
-    private long appendToFileHelper(byte[] bytes) throws IOException
+    long appendToFileHelper(byte[] bytes) throws IOException
     {
+        assert bytes.length <= PIPE_BUF;
         System.out.println("starting with fd " + fd.get());
         if (fd.get() == null || fd.get() <= 0)
         {
@@ -85,13 +86,17 @@ public class MergeFile implements Iterable<byte[]>
             }
         }
 
-        return
+        long retVal =
             appendToFile
             (
                 fd.get(),
                 bytes,
                 bytes.length
             );
+
+        assert retVal == bytes.length;
+
+        return retVal;
     }
 
     // todo it seems like instantiation is pretty much just done to implement iterator

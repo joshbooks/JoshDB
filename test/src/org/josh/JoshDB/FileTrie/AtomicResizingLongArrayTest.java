@@ -38,12 +38,12 @@ public class AtomicResizingLongArrayTest
 
         AtomicResizingLongArray testThing = new AtomicResizingLongArray();
 
-        for (int i = 0; i < 31337; i++)
+        for (int i = 0; i < 0x1000000; i++)
         {
             testThing.set(i, (i * (Long.MAX_VALUE >> 4)));
         }
 
-        for (int i = 0; i < 31337; i++)
+        for (int i = 0; i < 0x1000000; i++)
         {
             if (testThing.get(i) != (i * (Long.MAX_VALUE >> 4)))
             {

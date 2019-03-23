@@ -1,24 +1,28 @@
 package org.josh.JoshDB.FileTrie;
 
-import org.testng.annotations.Test;
+import org.junit.After;
+import org.junit.Test;
 
+import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConsistencyTest
 {
     private static final Path testLocus = Paths.get("./consistencyTestFile");
     private static final Path testBufferPath = Paths.get("./testBuffer");
     private static final byte[] testBuffer = new byte[324];
-    private static final Object testBufferLock = new Object();
+
     static
     {
-
         try
         {
             if (Files.newInputStream(testBufferPath).read(testBuffer) != testBuffer.length)
@@ -32,36 +36,70 @@ public class ConsistencyTest
         }
     }
 
-    int numThreads = 5;
-    // This should really be trove hashmap since we're mapping longs.
-    // Since we're only using values well within int range it works for
-    // this test, but keep in mind for prod.
-    byte[][] pages = new byte[numThreads][];
+    static AtomicInteger threadNumber = new AtomicInteger(0);
 
-
-    public Runnable threadFunction =
-    () ->
+    @After
+    public void zeroCounter()
     {
-        Random entropy = new Random();
-        String threadName = Thread.currentThread().getName();
-        System.out.println("checkpoint 1 from " + threadName);
+        threadNumber.set(0);
+    }
 
-        MergeFile testMerge = MergeFile.mergeFileForPath(testLocus);
+    @After
+    public void deleteTestFile()
+    {
+        try
+        {
+            Files.delete(testLocus);
+        }
+        catch (IOException e)
+        {
+            System.out.println("Got an IOException: " + e.getMessage());
+            System.out.println("At: ");
+            e.printStackTrace();
+        }
+    }
 
-        //todo weakened the test temporarily to debug, should restore to full strength
-        //int objectLength = entropy.nextInt(MergeFile.PIPE_BUF * 5);
-//        int objectLength = MergeFile.PIPE_BUF - 24;
+    static void writeThreadFunction()
+    {
+        int myThreadNumber = threadNumber.getAndIncrement();
 
-        byte[] object = testBuffer;//new byte[objectLength];
-        int objectLength = object.length;
+        byte[] myBuffer = new byte[MergeFile.PIPE_BUF];
 
-//        entropy.nextBytes(object);
-
-        long sequenceNumber;
+        Arrays.fill(myBuffer, (byte)myThreadNumber);
 
         try
         {
-            sequenceNumber = testMerge.writeSerializedObject(object);
+            MergeFile.mergeFileForPath(testLocus).appendToFileHelper(myBuffer);
+        }
+        catch (IOException e)
+        {
+            System.out.println("Got an IOException: " + e.getMessage());
+            System.out.println("At: ");
+            e.printStackTrace();
+        }
+    }
+
+    @Test
+    public void testWriteConsistency() throws InterruptedException
+    {
+        int numThreads = 0x20;
+        Thread[] threads = new Thread[numThreads];
+        for (int i = 0; i < numThreads; i++)
+        {
+            threads[i] = new Thread(ConsistencyTest::writeThreadFunction);
+            threads[i].start();
+        }
+
+        for (int i = 0; i < numThreads; i++)
+        {
+            threads[i].join();
+        }
+
+        InputStream testReader;
+
+        try
+        {
+            testReader = Files.newInputStream(testLocus);
         }
         catch (IOException e)
         {
@@ -69,143 +107,59 @@ public class ConsistencyTest
             return;
         }
 
-        pages[(int)sequenceNumber] = object;
+        byte[] testBuffer = new byte[MergeFile.PIPE_BUF];
+        boolean[] didFindBufferForThread = new boolean[numThreads];
+        Arrays.fill(didFindBufferForThread, false);
 
-        // todo test read once we can read out a
-        // particular object instead of just the first one
-
-        try
+        for (int i = 0; i < numThreads; i++)
         {
-            byte[] objectFromFile = testMerge.getObject(sequenceNumber);
-            boolean fail = !Arrays.equals(object, objectFromFile);
-            if (fail)
+            try
             {
-                assert objectFromFile.length == object.length;
-                synchronized (this)
+                int retVal = testReader.read(testBuffer, 0, testBuffer.length);
+                if (retVal < MergeFile.PIPE_BUF)
                 {
-                    for (int i = 0; i < object.length; i++)
-                    {
-                        if (object[i] != objectFromFile[i])
-                        {
-                            for (int j = -0x10; j < 0x11; j++)
-                            {
-                                if (j + i < 0 || j + i >= objectLength)
-                                {
-                                    continue;
-                                }
+                    System.out.println("Failed to read a full buffer. WTF?");
+                }
+            }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+                return;
+            }
 
-                                if (object[j+i] == objectFromFile[i])
-                                {
-                                    System.out.println("object " + sequenceNumber + " index " + i + " was shifted " + j);
-                                }
-                            }
+            byte valueForArray = testBuffer[0];
+            boolean allCorrect = true;
 
-//                            System
-//                                .out
-//                                .println(
-//                                    "Failed on index "
-//                                    + i
-//                                    + " byte from file: "
-//                                    + String.format("position %d\t%c", i,  (char)(objectFromFile[i])));
-//                            System.out.println("in object " + sequenceNumber + " index " + i + " matched");
-                        }
-                    }
+            for (int j = 0; j < MergeFile.PIPE_BUF; j++)
+            {
+                if (testBuffer[j] != valueForArray)
+                {
+                    allCorrect = false;
+                    break;
                 }
             }
 
-            if (!fail)
+            if (allCorrect)
             {
-                System.out.println("in thread" + threadName + ": " + sequenceNumber + " matched perfectly");
+                didFindBufferForThread[valueForArray] = true;
             }
             else
             {
-                System.out.println("in thread" + threadName + ": " + sequenceNumber + " was not a match");
+                System.out.println("the " + valueForArray + "th array had at least one inconsistency");
             }
-
-//            assert !fail;
         }
-        catch (IOException e)
-        {
-            e.printStackTrace();
-        }
-        catch (InterruptedException e)
-        {
-            e.printStackTrace();
-        }
-    };
 
-    public ConsistencyTest() throws NoSuchAlgorithmException
-    {
-    }
-
-    @Test
-    public void testSingleThreadedConsistency() throws IOException
-    {
+        boolean missedAtLeastOne = false;
         for (int i = 0; i < numThreads; i++)
         {
-            threadFunction.run();
-        }
-
-
-//        RandomAccessFile in = new RandomAccessFile(testLocus.toFile(), "r");
-//
-//        for (byte i = in.readByte(); in.getFilePointer() < in.length(); i = in.readByte())
-//        {
-//            System.out.println(String.format("position %d\t%02x",in.getFilePointer()-1, i) + "\t" + (char) i);
-//        }
-//
-//        in.close();
-
-        Files.delete(testLocus);
-    }
-
-    @Test
-    public void testReadWriteConsistency() throws InterruptedException, IOException
-    {
-        Thread[] testThreads = new Thread[numThreads];
-        for (int i = 0; i < numThreads; i++)
-        {
-            testThreads[i] = new Thread(threadFunction);
-        }
-
-        for (int i = 0; i < numThreads; i++)
-        {
-            testThreads[i].start();
-        }
-
-        for (int i = 0; i < numThreads; i++)
-        {
-            testThreads[i].join();
-        }
-
-//        RandomAccessFile in = new RandomAccessFile(testLocus.toFile(), "r");
-//
-//        for (byte i = in.readByte(); in.getFilePointer() < in.length(); i = in.readByte())
-//        {
-//            System.out.println(String.format("position %d\t%02x",in.getFilePointer()-1, i) + "\t" + (char) i);
-//        }
-
-
-        //in = new RandomAccessFile(testLocus.toFile(), "r");
-
-        for (int i = 0; i < numThreads; i++)
-        {
-            byte[] singleThreadedFileRead = MergeFile.mergeFileForPath(testLocus).getObject(i);
-
-            boolean fail = !Arrays.equals(singleThreadedFileRead, pages[i]);
-
-            //todo someday this should be an assert
-            if (fail)
+            if (!didFindBufferForThread[i])
             {
-                System.out.println("Object with sequence number "+ i+ " was still inconsistent when we read it single threaded");
+                System.out.println("Didn't find " + i);
+                missedAtLeastOne = true;
             }
         }
 
-
-
-
-//        in.close();
-
-        Files.delete(testLocus);
+        assert !missedAtLeastOne;
     }
+
 }
