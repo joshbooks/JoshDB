@@ -573,7 +573,7 @@ public class MergeFile implements Iterable<byte[]>
      * PAGE_BEGIN marker for that object, that way we can keep track
      * of which Object each page corresponds to
      */
-    private static AtomicLong getObjectCount(Path file)
+    static AtomicLong getObjectCount(Path file)
     {
         // todo decide whether this or getMergeFileForPath's logic is better,
         // factor out, and reuse in the other
@@ -618,6 +618,16 @@ public class MergeFile implements Iterable<byte[]>
         }
     }
 
+    static boolean isMemberOfObject(byte[] page, long sequenceNumber)
+    {
+        assert
+            ByteBuffer.wrap(page, 0, 4).getInt()
+            ==
+            PAGE_BEGIN_INT;
+
+        return ByteBuffer.wrap(page, 4, 8).getLong() == sequenceNumber;
+    }
+
     // So this is not great for caching, not a great design long term, but
     // short term it's super easy to grok so it feels pretty worth it for now
     byte[] delimitedPage(long sequenceNumber)
@@ -640,9 +650,8 @@ public class MergeFile implements Iterable<byte[]>
     }
 
     //ok, let's try writing a new version of this while I'm like mostly sober
-    public List<byte[]> delimitedObject(byte[] serializedObject)
+    public List<byte[]> delimitedObject(byte[] serializedObject, long sequenceNumber)
     {
-        long sequenceNumber = getObjectCount(file).getAndIncrement();
         int numPages =
             numberOfPagesForSerializedObject(serializedObject.length);
         int objectPosition = 0;

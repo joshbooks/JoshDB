@@ -165,8 +165,54 @@ public class ConsistencyTest
     }
 
     @Test
+    public void testSequenceNumberParsing()
+    {
+        // bogus value for sequence number
+        long sequenceNumber = 0x1337;
+
+        // The size of a page minus the size of the delimiting magic numbers
+        int usablePageSize = MergeFile.PIPE_BUF - (Integer.BYTES * 4);
+        // account for the sequence number that gets embedded
+        usablePageSize -= Long.BYTES;
+
+        // Test a buffer that should perfectly fill one page
+        byte[] serializedObject = new byte[usablePageSize];
+
+        Arrays.fill(serializedObject, (byte) 13);
+
+
+        List<byte[]> delimitedObject =
+        MergeFile
+            .mergeFileForPath(testLocus)
+            .delimitedObject(serializedObject, sequenceNumber);
+
+        for (byte[] delimitedPage : delimitedObject)
+        {
+            assert MergeFile.isMemberOfObject(delimitedPage, sequenceNumber);
+        }
+
+        // Test a buffer that's one byte too long to fit a page
+        serializedObject = new byte[usablePageSize + 1];
+
+        Arrays.fill(serializedObject, (byte) 13);
+
+        delimitedObject =
+            MergeFile
+            .mergeFileForPath(testLocus)
+            .delimitedObject(serializedObject, sequenceNumber);
+
+        for (byte[] delimitedPage : delimitedObject)
+        {
+            assert MergeFile.isMemberOfObject(delimitedPage, sequenceNumber);
+        }
+    }
+
+    @Test
     public void testSerializedObjectDelimiterLength()
     {
+        // bogus value for sequence number
+        long sequenceNumber = 0x1337;
+
         // The size of a page minus the size of the delimiting magic numbers
         int usablePageSize = MergeFile.PIPE_BUF - (Integer.BYTES * 4);
         // account for the sequence number that gets embedded
@@ -186,7 +232,7 @@ public class ConsistencyTest
         List<byte[]> delimitedObject =
             MergeFile
                 .mergeFileForPath(testLocus)
-                .delimitedObject(serializedObject);
+                .delimitedObject(serializedObject, sequenceNumber);
 
         assert delimitedObject.size() == 1;
 
@@ -206,7 +252,7 @@ public class ConsistencyTest
         delimitedObject =
           MergeFile
             .mergeFileForPath(testLocus)
-            .delimitedObject(serializedObject);
+            .delimitedObject(serializedObject, sequenceNumber);
 
         assert delimitedObject.size() == 2;
 
