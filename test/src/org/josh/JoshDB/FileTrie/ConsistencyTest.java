@@ -1,6 +1,7 @@
 package org.josh.JoshDB.FileTrie;
 
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.io.BufferedReader;
@@ -12,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,7 +40,7 @@ public class ConsistencyTest
 
     static AtomicInteger threadNumber = new AtomicInteger(0);
 
-    @After
+    @Before
     public void zeroCounter()
     {
         threadNumber.set(0);
@@ -160,6 +162,56 @@ public class ConsistencyTest
         }
 
         assert !missedAtLeastOne;
+    }
+
+    @Test
+    public void testSerializedObjectDelimiterLength()
+    {
+        // The size of a page minus the size of the delimiting magic numbers
+        int usablePageSize = MergeFile.PIPE_BUF - (Integer.BYTES * 4);
+        // account for the sequence number that gets embedded
+        usablePageSize -= Long.BYTES;
+
+        // Test a buffer that should perfectly fill one page
+        byte[] serializedObject = new byte[usablePageSize];
+
+        Arrays.fill(serializedObject, (byte) 13);
+
+        assert
+            MergeFile.numberOfPagesForSerializedObject(serializedObject.length)
+            ==
+            1;
+
+
+        List<byte[]> delimitedObject =
+            MergeFile
+                .mergeFileForPath(testLocus)
+                .delimitedObject(serializedObject);
+
+        assert delimitedObject.size() == 1;
+
+
+        // Test a buffer that's one byte too long to fit a page
+
+        serializedObject = new byte[usablePageSize + 1];
+
+        Arrays.fill(serializedObject, (byte) 13);
+
+        assert
+          MergeFile.numberOfPagesForSerializedObject(serializedObject.length)
+          ==
+          2;
+
+
+        delimitedObject =
+          MergeFile
+            .mergeFileForPath(testLocus)
+            .delimitedObject(serializedObject);
+
+        assert delimitedObject.size() == 2;
+
+
+
     }
 
 }

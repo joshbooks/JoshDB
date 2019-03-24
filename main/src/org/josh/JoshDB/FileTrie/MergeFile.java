@@ -240,11 +240,14 @@ public class MergeFile implements Iterable<byte[]>
 
     static int numberOfPagesForSerializedObject(int length)
     {
-        int usabePageLength = PIPE_BUF - PAGE_END.length - PAGE_BEGIN.length;
+        int usabePageLength = PIPE_BUF - PAGE_END.length - PAGE_BEGIN.length - Long.BYTES;
+        // That last long is for the sequence number
         length += OBJECT_BEGIN.length + OBJECT_END.length;
 
         int numPages = length / usabePageLength;
         numPages += length % usabePageLength != 0 ? 1 : 0;
+
+        System.out.println("Expected number of pages for " + length + " is " + numPages);
 
         return numPages;
     }
@@ -587,51 +590,6 @@ public class MergeFile implements Iterable<byte[]>
         return existing;
     }
 
-    private static ArcCloseable<OutputStream> getWriter(Path file) throws IOException
-    {
-        assert file != null;
-        ArcCloseable<OutputStream> existing = writerForFile.get(file);
-
-        //increment for the thread calling this function
-        while (existing == null || !existing.incRef())
-        {
-            OutputStream newWriter = createWriter(file);
-
-            ArcCloseable<OutputStream> replacement = new ArcCloseable<>(newWriter);
-            //increment for map reference
-            replacement.incRef();
-
-            if (existing == null)
-            {
-                writerForFile.putIfAbsent(file, replacement);
-                existing = writerForFile.get(file);
-            }
-            else if (!writerForFile.replace(file, existing, replacement))
-            {//basically this case should only come up if a thread dies while expiring a writer
-                replacement.decRef();
-                existing = writerForFile.get(file);
-            }
-        }
-
-        return existing;
-    }
-
-    private static OutputStream createWriter(Path file) throws IOException
-    {
-        return Files.newOutputStream
-        (
-            file,
-            StandardOpenOption.APPEND,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.SYNC,
-            StandardOpenOption.DSYNC
-        );
-    }
-
-    public static void doneWithWriter(ArcCloseable<OutputStream> writer)
-    {
-        writer.decRef();
-    }
 
     public void validateAndWriteDelimitedPage(Path file, byte[] page) throws IOException
     {
@@ -660,119 +618,111 @@ public class MergeFile implements Iterable<byte[]>
         }
     }
 
-    private static final int PAGE_END_POSITION = PIPE_BUF - PAGE_END.length;
+    // So this is not great for caching, not a great design long term, but
+    // short term it's super easy to grok so it feels pretty worth it for now
+    byte[] delimitedPage(long sequenceNumber)
+    {
+        byte[] page = new byte[PIPE_BUF];
+        System.arraycopy(PAGE_BEGIN, 0, page, 0, PAGE_BEGIN.length);
+        ByteBuffer.wrap(page, 4, 8).putLong(sequenceNumber);
 
-    public long writeSerializedObject(byte[] serializedObject) throws IOException
+        System
+          .arraycopy
+          (
+            PAGE_END,
+            0,
+            page,
+            PIPE_BUF - PAGE_END.length - 1,
+            PAGE_END.length
+          );
+
+        return page;
+    }
+
+    //ok, let's try writing a new version of this while I'm like mostly sober
+    public List<byte[]> delimitedObject(byte[] serializedObject)
     {
         long sequenceNumber = getObjectCount(file).getAndIncrement();
-
+        int numPages =
+            numberOfPagesForSerializedObject(serializedObject.length);
         int objectPosition = 0;
-        int objectLength = serializedObject.length;
+        List<byte[]> delimitedPages = new ArrayList<>(numPages);
 
-
-        int objectEndBytesWritten = 0;
-
-        while (objectEndBytesWritten != OBJECT_END.length)
+        for (int i = 0; i < numPages; i++)
         {
-            byte[] page = new byte[PIPE_BUF];
-            int pagePosition = 0;
+            byte[] page = delimitedPage(sequenceNumber);
+            // two ints = 8 plus another 8 for the sequence number
+            int availableSpace = PIPE_BUF - 16;
+            // start after PAGE_BEGIN and sequence number
+            int pagePosition = 12;
 
-            //PAGE_BEGIN
-            System.arraycopy(PAGE_BEGIN, 0, page, pagePosition, PAGE_BEGIN.length);
-            pagePosition += PAGE_BEGIN.length;
-
-            //sequence number
-            ByteBuffer.wrap(page, PAGE_BEGIN.length, 8).putLong(sequenceNumber);
-            pagePosition += 8;
-
-            // OBJECT_BEGIN for first page
-            if (objectPosition == 0)
+            if (i == 0) // first page needs OBJECT_BEGIN
             {
-                System.arraycopy(OBJECT_BEGIN, 0, page, pagePosition, OBJECT_BEGIN.length);
+                System
+                    .arraycopy
+                    (
+                        OBJECT_BEGIN,
+                        0,
+                        page,
+                        pagePosition,
+                        OBJECT_BEGIN.length
+                    );
                 pagePosition += OBJECT_BEGIN.length;
+                availableSpace -= OBJECT_BEGIN.length;
             }
 
-            int remainingObjectLength = objectLength - objectPosition;
-            int remainingPageLength = (PIPE_BUF - PAGE_END.length) - pagePosition;
 
-            //int leftover = remainingPageLength - remainingObjectLength;
+            System.out.println("params are: serializedObject: "+ serializedObject +", \n" +
+                               "objectPosition: "+ objectPosition +", \n" +
+                               "page,: "+ page +" \n" +
+                               "pagePosition: "+ pagePosition +", \n" +
+                               "availableSpace: "+ availableSpace );
 
+            int remainingObjectLength = serializedObject.length - objectPosition;
 
-            //write the rest of the object, then OBJECT_END
-            if (remainingObjectLength + OBJECT_END.length <= remainingPageLength)
-            {
-                System.arraycopy
+            int amountToWrite = Math.min(availableSpace, remainingObjectLength);
+
+            System
+                .arraycopy
                 (
                     serializedObject,
                     objectPosition,
                     page,
                     pagePosition,
-                    remainingObjectLength
-                );
-                pagePosition += remainingObjectLength;
-                objectPosition += remainingObjectLength;
-
-                int objectEndBytesToWrite = OBJECT_END.length - objectEndBytesWritten;
-
-                System.arraycopy
-                (
-                    OBJECT_END,
-                    objectEndBytesWritten,
-                    page,
-                    pagePosition,
-                    objectEndBytesToWrite
-                );
-                pagePosition += objectEndBytesToWrite; //debugging
-                //could just assign, but this is nicer for debugging so leaving it for now
-                objectEndBytesWritten += objectEndBytesToWrite;
-            }
-            //write the whole page up to PAGE_END
-            else if (remainingObjectLength >= remainingPageLength)
-            {
-                System.arraycopy
-                (
-                    serializedObject,
-                    objectPosition,
-                    page,
-                    pagePosition,
-                    remainingPageLength
+                    amountToWrite
                 );
 
-                objectPosition += remainingPageLength;
-                pagePosition += remainingPageLength;
+            objectPosition += amountToWrite;
+            pagePosition += amountToWrite;
 
-                assert pagePosition == PAGE_END_POSITION;
-            }
-            //wraparound case, write the rest of the object and then at least one byte of OBJECT_END
-            else if (remainingObjectLength < remainingPageLength)
+            if (i == numPages - 1) //last page needs OBJECT_END
             {
-                //this one I might have to think about for a minute
-                int amountToWrite = remainingPageLength - PAGE_END.length;
-                System.arraycopy(serializedObject, objectPosition, page, pagePosition, amountToWrite);
-                //objectPosition should be serializedObject.length after this
-                objectPosition += amountToWrite;
-                pagePosition += amountToWrite;
+                // so I think the only sensible way to deal with this is to
+                // allow partial or full overwrites of PAGE_END by OBJECT_END,
+                // that way we can still have sensible page parsing and we
+                // still have recognizable bytes at the end of each object and
+                // page so we can ensure pages are read entirely and still
+                // recognize the end of object properly
 
-                int objectEndBytesToWrite = (PIPE_BUF - PAGE_END.length) - pagePosition;
-                System.arraycopy(OBJECT_END, 0, page, pagePosition, objectEndBytesToWrite);
-                objectEndBytesWritten += objectEndBytesToWrite;
-                pagePosition += objectEndBytesToWrite;
 
-                assert pagePosition == PAGE_END_POSITION;
+                System
+                    .arraycopy
+                    (
+                        OBJECT_END,
+                        0,
+                        page,
+                        pagePosition,
+                        OBJECT_END.length
+                    );
             }
-            else
-            {
-                System.out.println("Something has gone terribly wrong");
-                assert false;
-            }
 
-            System.arraycopy(PAGE_END, 0, page, PAGE_END_POSITION, PAGE_END.length);
-
-            validateAndWriteDelimitedPage(file, page);
+            delimitedPages.add(i, page);
         }
 
-        return sequenceNumber;
+        return delimitedPages;
     }
+
+
 
     private static final int PAGE_BEGIN_INT = ByteBuffer.wrap(PAGE_BEGIN).getInt();
     private static final int OBJECT_BEGIN_INT = ByteBuffer.wrap(OBJECT_BEGIN).getInt();
