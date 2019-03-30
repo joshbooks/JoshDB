@@ -15,6 +15,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
+
 public class MergeFile implements Iterable<byte[]>
 {
     static
@@ -240,16 +241,19 @@ public class MergeFile implements Iterable<byte[]>
 
     static int numberOfPagesForSerializedObject(int length)
     {
-        int usabePageLength = PIPE_BUF - PAGE_END.length - PAGE_BEGIN.length - Long.BYTES;
-        // That last long is for the sequence number
-        length += OBJECT_BEGIN.length + OBJECT_END.length;
+      // long is for sequence number, integer is for remaining length
+      int usabePageLength =
+        PIPE_BUF - PAGE_END.length
+        - PAGE_BEGIN.length - Long.BYTES - Integer.BYTES;
 
-        int numPages = length / usabePageLength;
-        numPages += length % usabePageLength != 0 ? 1 : 0;
+      length += OBJECT_BEGIN.length + OBJECT_END.length;
 
-        System.out.println("Expected number of pages for " + length + " is " + numPages);
+      int numPages = length / usabePageLength;
+      numPages += length % usabePageLength != 0 ? 1 : 0;
 
-        return numPages;
+      System.out.println("Expected number of pages for " + length + " is " + numPages);
+
+      return numPages;
     }
 
     private static List<Long> pagePositionsForNextObject(RandomAccessFile in, int numPages) throws IOException
@@ -287,134 +291,9 @@ public class MergeFile implements Iterable<byte[]>
         return pagePositions;
     }
 
-    private static int numberOfEndBytes(byte[] bytes)
+    static long sequenceNumberOfPage(byte[] page)
     {
-        assert bytes.length == OBJECT_END.length;
-
-        int numBytes = 0;
-        byte lastByte = bytes[bytes.length - 1];
-
-        for (int i = 0; i < OBJECT_END.length; i++)
-        {
-            if (lastByte == OBJECT_END[i])
-            {
-                if (i == 0)
-                {
-                    //There was one byte and we validated it
-                    return 1;
-                }
-                numBytes = OBJECT_END.length - i;
-                break;
-            }
-        }
-
-        for (int i = numBytes; i > 0; i--)
-        {
-            // todo
-            // I think this might be right,
-            // but it seems tricky
-            assert
-                bytes[bytes.length - i]
-                ==
-                OBJECT_END[i - 1]
-                ;
-        }
-
-        return numBytes;
-    }
-
-    NonBlockingHashMap<Long, long[]> sequenceNumberToOffsets =
-            new NonBlockingHashMap<>();
-
-    public byte[] getObject(long objectSequenceNumber) throws IOException, InterruptedException
-    {
-        RandomAccessFile in = new RandomAccessFile(file.toFile(), "r");
-
-        long[] offsets = sequenceNumberToOffsets.get(objectSequenceNumber);
-
-        if (offsets == null)
-        {
-            //I hate this boxing, does trove have a list?
-            ArrayList<Long> offsetList = new ArrayList<>();
-
-            int arrayLength = (int) (in.length() / PIPE_BUF);
-
-            for (int i = 0; i < arrayLength; i++)
-            {
-                long sequenceNumber = sequenceArray.get(i);
-                // todo this means I have to treat index 0 specially or not use it
-                if (sequenceNumber < 0)
-                {
-                    in.seek(i * PIPE_BUF);
-                    sequenceNumber = sequenceNumberOfPage(in);
-                    sequenceArray.set(i, sequenceNumber);
-                }
-
-                // todo bit of a shame to waste the calculation for other sequence
-                // number offset relationships, but I'd really rather not memoize with
-                // ArrayLists
-                if (sequenceNumber != objectSequenceNumber)
-                {
-                    continue;
-                }
-
-                offsetList.add((in.getFilePointer() / PIPE_BUF) * PIPE_BUF);
-            }
-
-            offsets = new long[offsetList.size()];
-            int index = 0;
-            for (long i : offsetList)
-            {
-                offsets[index] = i;
-            }
-
-            if (offsets.length == 0)
-            {
-                throw new IOException("Tried to read an object that doesn't exist yet");
-            }
-
-            sequenceNumberToOffsets.put(objectSequenceNumber, offsets);
-        }
-
-        if (offsets.length == 0)
-        {
-            throw new IOException("tried to get an object that hasn't been written yet");
-        }
-
-        in.seek(offsets[0]);
-
-        // todo I know it's terrible. we have all the offsets and then
-        // just use one, I didn't know we would have all this
-        // information when I wrote the other function, will revise
-        List<byte[]> pages = pageListForNextObject(in);
-
-        int totalLength = pages.stream().mapToInt(page -> page.length).sum();
-
-        byte[] serializedObject = new byte[totalLength];
-        int readBufferHead = 0;
-
-        for (byte[] page : pages)
-        {
-            System.arraycopy(page, 0, serializedObject, readBufferHead, page.length);
-            readBufferHead += page.length;
-        }
-
-        return serializedObject;
-    }
-
-
-    long sequenceNumberOfPage(RandomAccessFile in) throws IOException, InterruptedException
-    {
-        long position = in.getFilePointer();
-        assert position % PIPE_BUF == 0;
-
-        in.seek(position + PAGE_BEGIN.length);
-
-        long objectSequenceNumber = in.readLong();
-
-        sequenceArray.set((int) position / PIPE_BUF, objectSequenceNumber);
-
-        return objectSequenceNumber;
+        return ByteBuffer.wrap(page, 4, 12).getLong();
     }
 
     long offsetForNextObject(List<Long> offsetsForPreviousObject, RandomAccessFile in) throws IOException
@@ -618,6 +497,63 @@ public class MergeFile implements Iterable<byte[]>
         }
     }
 
+    // OBJECT_END should just be a check. In the metadata we store in an object
+    // we should store object length and use that to determine where the end is
+    static byte[] undelimitedObject(List<byte[]> delimitedPages)
+    {
+        byte[] object = null;
+        long objectSequenceNumber = -1;
+        int objectPosition = 0;
+
+        // todo ok, so where do we expect the OBJECT_END bytes to be?
+        for (int i = 0; i < delimitedPages.size(); i++)
+        {
+            byte[] delimitedPage = delimitedPages.get(i);
+            // TODO this should be a global constant whose calculation is well commented
+            int objectDataBegin = 16;
+            // TODO same here
+            int dataInPage = PIPE_BUF - objectDataBegin - PAGE_END.length;
+
+            // extract metadata
+            long pageSequenceNumber = ByteBuffer.wrap(delimitedPage, 4, 12).getLong();
+            int remainingLength = ByteBuffer.wrap(delimitedPage, 12, 16).getInt();
+
+            if (objectSequenceNumber == -1)
+            {
+              objectSequenceNumber = pageSequenceNumber;
+            }
+            else
+            {
+              assert objectSequenceNumber == pageSequenceNumber;
+            }
+
+            if (i == 0)
+            {
+              //todo assert OBJECT_BEGIN is there
+              // copy the data after OBJECT_BEGIN
+              objectDataBegin += OBJECT_BEGIN.length;
+              dataInPage -= OBJECT_BEGIN.length;
+              object = new byte[remainingLength];
+            }
+            // not mutually exclusive with this being the first page
+            if (i == delimitedPages.size() - 1)
+            {
+              // make sure OBJECT_END is where we expect it to be and copy all
+              // the data before that
+              // todo assert OBJECT_END is there
+              dataInPage = remainingLength;
+            }
+
+
+            System.arraycopy(delimitedPage, objectDataBegin, object, objectPosition, dataInPage);
+            objectPosition += dataInPage;
+        }
+
+
+        return object;
+    }
+
+
     static boolean isMemberOfObject(byte[] page, long sequenceNumber)
     {
         assert
@@ -630,11 +566,12 @@ public class MergeFile implements Iterable<byte[]>
 
     // So this is not great for caching, not a great design long term, but
     // short term it's super easy to grok so it feels pretty worth it for now
-    byte[] delimitedPage(long sequenceNumber)
+    static byte[] delimitedPage(long sequenceNumber, int remainingLength)
     {
         byte[] page = new byte[PIPE_BUF];
         System.arraycopy(PAGE_BEGIN, 0, page, 0, PAGE_BEGIN.length);
-        ByteBuffer.wrap(page, 4, 8).putLong(sequenceNumber);
+        ByteBuffer.wrap(page, 4, 12).putLong(sequenceNumber);
+        ByteBuffer.wrap(page, 12, 16).putInt(remainingLength);
 
         System
           .arraycopy
@@ -650,85 +587,88 @@ public class MergeFile implements Iterable<byte[]>
     }
 
     //ok, let's try writing a new version of this while I'm like mostly sober
-    public List<byte[]> delimitedObject(byte[] serializedObject, long sequenceNumber)
+    static public List<byte[]> delimitedObject(byte[] serializedObject, long sequenceNumber)
     {
-        int numPages =
-            numberOfPagesForSerializedObject(serializedObject.length);
-        int objectPosition = 0;
-        List<byte[]> delimitedPages = new ArrayList<>(numPages);
+      int numPages =
+          numberOfPagesForSerializedObject(serializedObject.length);
+      int objectPosition = 0;
+      List<byte[]> delimitedPages = new ArrayList<>(numPages);
+      int remainingLength = serializedObject.length;
 
-        for (int i = 0; i < numPages; i++)
+      for (int i = 0; i < numPages; i++)
+      {
+        byte[] page = delimitedPage(sequenceNumber, remainingLength);
+        // two ints = 8 plus another 8 for the sequence number,
+        // plus 4 for the remaining length
+        int availableSpace = PIPE_BUF - 20;
+        // start after PAGE_BEGIN, sequence number, and remaining length
+        int pagePosition = 16;
+
+        if (i == 0) // first page needs OBJECT_BEGIN
         {
-            byte[] page = delimitedPage(sequenceNumber);
-            // two ints = 8 plus another 8 for the sequence number
-            int availableSpace = PIPE_BUF - 16;
-            // start after PAGE_BEGIN and sequence number
-            int pagePosition = 12;
-
-            if (i == 0) // first page needs OBJECT_BEGIN
-            {
-                System
-                    .arraycopy
-                    (
-                        OBJECT_BEGIN,
-                        0,
-                        page,
-                        pagePosition,
-                        OBJECT_BEGIN.length
-                    );
-                pagePosition += OBJECT_BEGIN.length;
-                availableSpace -= OBJECT_BEGIN.length;
-            }
+            System
+                .arraycopy
+                (
+                    OBJECT_BEGIN,
+                    0,
+                    page,
+                    pagePosition,
+                    OBJECT_BEGIN.length
+                );
+            pagePosition += OBJECT_BEGIN.length;
+            availableSpace -= OBJECT_BEGIN.length;
+        }
 
 
-            System.out.println("params are: serializedObject: "+ serializedObject +", \n" +
-                               "objectPosition: "+ objectPosition +", \n" +
-                               "page,: "+ page +" \n" +
-                               "pagePosition: "+ pagePosition +", \n" +
-                               "availableSpace: "+ availableSpace );
+        System.out.println("params are: serializedObject: "+ serializedObject +", \n" +
+                           "objectPosition: "+ objectPosition +", \n" +
+                           "page,: "+ page +" \n" +
+                           "pagePosition: "+ pagePosition +", \n" +
+                           "availableSpace: "+ availableSpace );
 
-            int remainingObjectLength = serializedObject.length - objectPosition;
+        int remainingObjectLength = serializedObject.length - objectPosition;
 
-            int amountToWrite = Math.min(availableSpace, remainingObjectLength);
+        int amountToWrite = Math.min(availableSpace, remainingObjectLength);
+
+        System
+            .arraycopy
+            (
+                serializedObject,
+                objectPosition,
+                page,
+                pagePosition,
+                amountToWrite
+            );
+
+        objectPosition += amountToWrite;
+        pagePosition += amountToWrite;
+        remainingLength -= amountToWrite;
+
+        if (i == numPages - 1) //last page needs OBJECT_END
+        {
+            // so I think the only sensible way to deal with this is to
+            // allow partial or full overwrites of PAGE_END by OBJECT_END,
+            // that way we can still have sensible page parsing and we
+            // still have recognizable bytes at the end of each object and
+            // page so we can ensure pages are read entirely and still
+            // recognize the end of object properly
+
 
             System
                 .arraycopy
                 (
-                    serializedObject,
-                    objectPosition,
+                    OBJECT_END,
+                    0,
                     page,
                     pagePosition,
-                    amountToWrite
+                    OBJECT_END.length
                 );
-
-            objectPosition += amountToWrite;
-            pagePosition += amountToWrite;
-
-            if (i == numPages - 1) //last page needs OBJECT_END
-            {
-                // so I think the only sensible way to deal with this is to
-                // allow partial or full overwrites of PAGE_END by OBJECT_END,
-                // that way we can still have sensible page parsing and we
-                // still have recognizable bytes at the end of each object and
-                // page so we can ensure pages are read entirely and still
-                // recognize the end of object properly
-
-
-                System
-                    .arraycopy
-                    (
-                        OBJECT_END,
-                        0,
-                        page,
-                        pagePosition,
-                        OBJECT_END.length
-                    );
-            }
-
-            delimitedPages.add(i, page);
         }
 
-        return delimitedPages;
+        delimitedPages.add(i, page);
+      }
+
+      return delimitedPages;
     }
 
 

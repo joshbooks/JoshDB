@@ -183,7 +183,6 @@ public class ConsistencyTest
 
         List<byte[]> delimitedObject =
         MergeFile
-            .mergeFileForPath(testLocus)
             .delimitedObject(serializedObject, sequenceNumber);
 
         for (byte[] delimitedPage : delimitedObject)
@@ -198,7 +197,6 @@ public class ConsistencyTest
 
         delimitedObject =
             MergeFile
-            .mergeFileForPath(testLocus)
             .delimitedObject(serializedObject, sequenceNumber);
 
         for (byte[] delimitedPage : delimitedObject)
@@ -217,6 +215,7 @@ public class ConsistencyTest
         int usablePageSize = MergeFile.PIPE_BUF - (Integer.BYTES * 4);
         // account for the sequence number that gets embedded
         usablePageSize -= Long.BYTES;
+        usablePageSize -= Integer.BYTES;
 
         // Test a buffer that should perfectly fill one page
         byte[] serializedObject = new byte[usablePageSize];
@@ -231,7 +230,6 @@ public class ConsistencyTest
 
         List<byte[]> delimitedObject =
             MergeFile
-                .mergeFileForPath(testLocus)
                 .delimitedObject(serializedObject, sequenceNumber);
 
         assert delimitedObject.size() == 1;
@@ -251,13 +249,48 @@ public class ConsistencyTest
 
         delimitedObject =
           MergeFile
-            .mergeFileForPath(testLocus)
             .delimitedObject(serializedObject, sequenceNumber);
 
         assert delimitedObject.size() == 2;
-
-
-
     }
+
+  @Test
+  public void testDelimitingUndelimitingConsistency()
+  {
+    // The size of a page minus the size of the delimiting magic numbers
+    int usablePageSize = MergeFile.PIPE_BUF - (Integer.BYTES * 4);
+    // account for the sequence number that gets embedded
+    usablePageSize -= Long.BYTES;
+    usablePageSize -= Integer.BYTES;
+    testDelimitingUndelimitingConsistencyForLength(usablePageSize);
+
+    // odd numbers, dumb programmers never see that coming,
+    // bet whatever stupid dev wrote this screwed that up
+    testDelimitingUndelimitingConsistencyForLength((usablePageSize + 5) + usablePageSize * 3);
+  }
+
+  public void testDelimitingUndelimitingConsistencyForLength(int length)
+  {
+    byte[] object = new byte[length];
+
+    Arrays.fill(object, (byte)13);
+
+    // make sure we're dealing with longs properly
+    long sequenceNumber = Long.MAX_VALUE;
+
+    List<byte[]> delimitedPages = MergeFile.delimitedObject(object, sequenceNumber);
+
+    for (byte[] delimitedPage: delimitedPages)
+    {
+      assert MergeFile.sequenceNumberOfPage(delimitedPage) == sequenceNumber;
+      assert delimitedPage.length == MergeFile.PIPE_BUF;
+    }
+
+    byte[] reUnDelimited = MergeFile.undelimitedObject(delimitedPages);
+
+    assert reUnDelimited.length == object.length;
+
+    assert Arrays.equals(reUnDelimited, object);
+  }
 
 }
