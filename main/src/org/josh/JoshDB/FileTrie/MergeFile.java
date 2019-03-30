@@ -40,84 +40,85 @@ public class MergeFile
   // we're at the last page, and if so how much of the last page contains actual data,
   // plus if we decide to use UDP then we have ordering built in.
   // This is followed by OBJECT_BEGIN and then data, ending with OBJECT_END
-  // once we've writte out all the data in the object, whether or not we'e
+  // once we've written out all the data in the object, whether or not we'e
   // filled up the entire page.
   // If OBJECT_END occurs before the end of the page, the remainder of the page
   // must be filled with zeroes up to PAGE_END if object end occurs less than 4 bytes
   // before PAGE_END it shall overwrite the bytes of PAGE_END
 
-    // hacky nonsense, should be dynamically determined
-    // based on the underlying filesystem, but using ext3 for now
-    // because that's what my laptop runs
-    public static final int PIPE_BUF = 4096;
+  // hacky nonsense, should be dynamically determined
+  // based on the underlying filesystem, but using ext3 for now
+  // because that's what my laptop runs
+  public static final int PIPE_BUF = 4096;
 
-    public static final byte[] OBJECT_BEGIN = new byte[]{'f', 'u', 'c', 'k'};
+  public static final byte[] OBJECT_BEGIN = new byte[]{'f', 'u', 'c', 'k'};
 
-    public static final byte[] PAGE_BEGIN = new byte[]{'d', 'a', 'm', 'n'};
+  public static final byte[] PAGE_BEGIN = new byte[]{'d', 'a', 'm', 'n'};
 
-    public static final byte[] OBJECT_END = new byte[]{'s', 'h', 'i', 't'};
+  public static final byte[] OBJECT_END = new byte[]{'s', 'h', 'i', 't'};
 
-    public static final byte[] PAGE_END = new byte[]{'z', '/', 'o', 's'};
+  public static final byte[] PAGE_END = new byte[]{'z', '/', 'o', 's'};
 
-    private final Path file;
-    private final AtomicResizingLongArray sequenceArray;
-    private ThreadLocal<Long> fd = new ThreadLocal<>();
+  private final Path file;
+  private final AtomicResizingLongArray sequenceArray;
+  private ThreadLocal<Long> fd = new ThreadLocal<>();
 
-    private static native long openFile(String filePath);
+  private static native long openFile(String filePath);
 
-    // todo this should be a Closeable so we can use the nice ArcWrapper we wrote
-    // and the close method should call this natjve method on fd if fd isn't -1
-    private static native long closeFile(long fd);
+  // todo this should be a Closeable so we can use the nice ArcWrapper we wrote
+  // and the close method should call this natjve method on fd if fd isn't -1
+  private static native long closeFile(long fd);
 
-    private static native long appendToFile(long fd, byte[] bytes, long numBytes);
+  private static native long appendToFile(long fd, byte[] bytes, long numBytes);
 
-    // could do this in native code but like nah
-    long appendToFileHelper(byte[] bytes) throws IOException
-    {
-        assert bytes.length <= PIPE_BUF;
-        System.out.println("starting with fd " + fd.get());
-        if (fd.get() == null || fd.get() <= 0)
+  // could do this in native code but like nah
+  long appendToFileHelper(byte[] bytes) throws IOException
+  {
+      assert bytes.length <= PIPE_BUF;
+      System.out.println("starting with fd " + fd.get());
+      if (fd.get() == null || fd.get() <= 0)
+      {
+        fd.set(openFile(file.toAbsolutePath().normalize().toString()));
+        if (fd.get() <= 0)
         {
-            fd.set(openFile(file.toAbsolutePath().normalize().toString()));
-            if (fd.get() <= 0)
-            {
-                throw new IOException("failed to open " + file + " with error " + fd);
-            }
+          throw new IOException("failed to open " + file + " with error " + fd);
         }
+      }
 
-        long retVal =
-            appendToFile
-            (
-                fd.get(),
-                bytes,
-                bytes.length
-            );
+      long retVal =
+        appendToFile
+        (
+          fd.get(),
+          bytes,
+          bytes.length
+        );
 
-        assert retVal == bytes.length;
+      assert retVal == bytes.length;
 
-        return retVal;
-    }
+      return retVal;
+  }
 
-    // todo it seems like instantiation is pretty much just done to implement iterator
-    // maybe that should be split into a different class??
-    private static NonBlockingHashMap<Path, MergeFile> registry =
-            new NonBlockingHashMap<>();
+  // todo it seems like instantiation is pretty much just done to implement iterator
+  // maybe that should be split into a different class??
+  // todo we don't do iterating anymore, that changes some things
+  private static NonBlockingHashMap<Path, MergeFile> registry =
+          new NonBlockingHashMap<>();
 
-    private static org.slf4j.Logger log = LoggerFactory.getLogger(MergeFile.class.getName());
+  private static org.slf4j.Logger log = LoggerFactory.getLogger(MergeFile.class.getName());
 
-    public static MergeFile mergeFileForPath(Path path)
-    {
-        MergeFile temp = new MergeFile(path);
+  public static MergeFile mergeFileForPath(Path path)
+  {
+      MergeFile temp = new MergeFile(path);
 
-        MergeFile shared = registry.putIfAbsent(path, temp);
+      MergeFile shared = registry.putIfAbsent(path, temp);
 
-        if (shared == null)
-        {
-            shared = temp;
-        }
+      if (shared == null)
+      {
+          shared = temp;
+      }
 
-        return shared;
-    }
+      return shared;
+  }
 
     private static final NonBlockingHashMap<Path, AtomicResizingLongArray> pathToSequenceArray =
             new NonBlockingHashMap<>();
