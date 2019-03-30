@@ -1,22 +1,17 @@
 package org.josh.JoshDB.FileTrie;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
-import org.josh.JoshDB.ArcCloseable;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 
-public class MergeFile implements Iterable<byte[]>
+public class MergeFile
 {
     static
     {
@@ -145,99 +140,7 @@ public class MergeFile implements Iterable<byte[]>
         this.sequenceArray = sequenceArrayForPath(file);
     }
 
-    @Override
-    public Iterator<byte[]> iterator()
-    {
-        //not thread safe, the notion is that input is always positioned
-        // to point to the next available object or the end of the file
-        RandomAccessFile input;
 
-        try
-        {
-            input = new RandomAccessFile(file.toFile(), "r");
-        }
-        catch (IOException e)
-        {
-            e.printStackTrace();
-            throw new UncheckedIOException
-            (
-                "Unable to open an InputStream for this MergeFile",
-                e
-            );
-        }
-
-        final RandomAccessFile effectiveIn = input;
-
-        return new Iterator<byte[]>()
-        {
-            @Override
-            public boolean hasNext()
-            {
-                try
-                {
-                    return effectiveIn.getFilePointer() < effectiveIn.length();
-                }
-                catch (IOException e)
-                {
-                    e.printStackTrace();
-                    throw new UncheckedIOException
-                    (
-                        "Failed to ascertain available bytes for this MergeFile",
-                        e
-                    );
-                }
-            }
-
-            @Override
-            public byte[] next()
-            {
-                try
-                {
-                    return arrayFromList(pageListForNextObject(effectiveIn));
-                }
-                catch (IOException e)
-                {
-                    e.printStackTrace();
-                    return null;
-                }
-            }
-        };
-    }
-
-    private byte[] arrayFromList(List<byte[]> list)
-    {
-        int totalSize = list.stream().mapToInt(array -> array.length).sum();
-
-        byte[] array = new byte[totalSize];
-
-        int position = 0;
-        for (byte[] page : list)
-        {
-            System.arraycopy(page, 0, array, position, page.length);
-
-            position += page.length;
-        }
-
-        return array;
-    }
-
-    static long alignRandomAccessFileToPipeBuf(RandomAccessFile in, boolean shouldLog) throws IOException
-    {
-        long position = in.getFilePointer();
-        long mod = position % PIPE_BUF;
-        if (mod != 0)
-        {
-            if (shouldLog)
-            {
-                log.warn("input file pointer was misaligned in pagePositionsForNextObject");
-            }
-            long aligner = position + (PIPE_BUF - mod);
-            in.seek(aligner);
-            position += aligner;
-        }
-
-        return position;
-    }
 
     static int numberOfPagesForSerializedObject(int length)
     {
@@ -256,191 +159,12 @@ public class MergeFile implements Iterable<byte[]>
       return numPages;
     }
 
-    private static List<Long> pagePositionsForNextObject(RandomAccessFile in, int numPages) throws IOException
-    {
-        long startingSequenceNumber = -1;
-        List<Long> pagePositions = new ArrayList<>();
-
-        for
-        (
-            boolean firstIter = true;
-            pagePositions.size() < numPages;
-            alignRandomAccessFileToPipeBuf(in, false)
-        )
-        {
-            alignRandomAccessFileToPipeBuf(in, firstIter);
-
-            long pagePosition = in.getFilePointer();
-
-            //seek to objectSequenceNumber
-            in.seek(pagePosition + PAGE_BEGIN.length);
-            long objectSequenceNumber = in.readLong();
-
-            if (firstIter)
-            {
-                startingSequenceNumber = objectSequenceNumber;
-                firstIter = false;
-            }
-
-            if (objectSequenceNumber == startingSequenceNumber)
-            {
-                pagePositions.add(pagePosition);
-            }
-        }
-
-        return pagePositions;
-    }
 
     static long sequenceNumberOfPage(byte[] page)
     {
         return ByteBuffer.wrap(page, 4, 12).getLong();
     }
 
-    long offsetForNextObject(List<Long> offsetsForPreviousObject, RandomAccessFile in) throws IOException
-    {
-        // shall include the first page after the previous object pages but no more after that
-        List<Long> candidates = new ArrayList<>();
-        for (int i = 1; i < offsetsForPreviousObject.size(); i++)
-        {
-            for
-            (
-                long difference = offsetsForPreviousObject.get(i-1) - offsetsForPreviousObject.get(i);
-                difference != PIPE_BUF;
-                difference += PIPE_BUF
-            )
-            {
-                candidates.add((offsetsForPreviousObject.get(i) - difference) + PIPE_BUF);
-            }
-        }
-        candidates.add(offsetsForPreviousObject.get(offsetsForPreviousObject.size()-1) + PIPE_BUF);
-
-        byte[] candidateBytes = new byte[OBJECT_BEGIN.length];
-
-        for (int i = 0; i < candidates.size() - 1; i++)
-        {
-            in.seek(candidates.get(i) + PAGE_BEGIN.length + Long.BYTES);
-            in.read(candidateBytes);
-            if (Arrays.equals(candidateBytes, OBJECT_BEGIN))
-            {
-                return candidates.get(i);
-            }
-        }
-
-        while (in.getFilePointer() < in.length())
-        {
-
-        }
-
-        //bogus return so I can run an unrelated test
-        return 1;
-    }
-
-
-    //todo need to position in at the beginning of the next object,
-    //which-- due to our fancy atomic append scheme-- might be the very next page
-    private List<byte[]> pageListForNextObject(RandomAccessFile in) throws IOException
-    {
-        List<byte[]> delimited = allPagesForNextEntry(in);
-
-        List<byte[]> cleaned = new ArrayList<>(delimited.size());
-
-        long sequenceNumber = -1;
-        boolean wraparound = false;
-
-        for (int i = 0; i < delimited.size(); i++)
-        {
-            byte[] delimitedPage = delimited.get(i);
-
-            //all pages should begin with PAGE_BEGIN then the sequence number
-            assert ByteBuffer.wrap(delimitedPage, 0, 4).getInt() == PAGE_BEGIN_INT;
-            long thisPageSequenceNumber = ByteBuffer.wrap(delimitedPage, 4, 8).getLong();
-
-            int objectDataStart;
-
-            if (i == 0)
-            {
-                sequenceNumber = thisPageSequenceNumber;
-                assert ByteBuffer.wrap(delimitedPage, 12, 4).getInt() == OBJECT_BEGIN_INT;
-                objectDataStart = 16;
-            }
-            else
-            {
-                assert thisPageSequenceNumber == sequenceNumber;
-                objectDataStart = 12;
-            }
-
-
-            //if this isn't the last page or the second to last page we
-            // want all the data up to PAGE_END
-            int objectDataEnd = delimitedPage.length - 4;
-
-            //if this is the last or second to last page we want to know where OBJECT_END is
-            if (i >= delimited.size() - 2)
-            {
-                if (i == delimited.size() - 1 && wraparound)
-                {
-                    //todo handle validation of the last page
-                    break;
-                }
-
-                // handle the regular last page case where we have
-                // OBJECT_END zeroes, then PAGE_END
-                if (i == delimited.size() - 1)
-                {
-                    //go from the beginning of object data up to the start of PAGE_END
-                    for (int k = objectDataStart; k < delimitedPage.length - 4; k++)
-                    {
-                        if (delimitedPage[k] == OBJECT_END[0])
-                        {
-                            if (delimitedPage[k+1] == OBJECT_END[1])
-                            {
-                                if (delimitedPage[k+2] == OBJECT_END[2])
-                                {
-                                    if (delimitedPage[k+3] == OBJECT_END[3])
-                                    {
-                                        objectDataEnd = k;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                //handle the wraparound case for the second to last page
-                if (i == delimited.size() - 2)
-                {
-                    int byteNumberEncountered = -1;
-                    for (int k = 0; k < 4; k++)
-                    {
-                        if (delimitedPage[delimitedPage.length - 5] == OBJECT_END[k])
-                        {
-                            byteNumberEncountered = k + 1;
-                        }
-                    }
-
-                    //wraparound case
-                    if (byteNumberEncountered != -1)
-                    {
-                        objectDataEnd = (delimitedPage.length - 4) - byteNumberEncountered;
-
-                        wraparound = true;
-                    }
-                }
-            }
-
-            byte[] cleanPage = new byte[objectDataEnd - objectDataStart];
-
-            System.arraycopy(delimitedPage, objectDataStart, cleanPage, 0, cleanPage.length);
-
-            cleaned.add(i, cleanPage);
-        }
-
-        return cleaned;
-    }
-
-    public static final NonBlockingHashMap<Path, ArcCloseable<OutputStream>> writerForFile =
-            new NonBlockingHashMap<>();
 
     public static final NonBlockingHashMap<Path, AtomicLong> objectCountForFile =
             new NonBlockingHashMap<>();
