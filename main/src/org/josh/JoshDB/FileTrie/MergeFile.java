@@ -30,18 +30,21 @@ public class MergeFile
         }
     }
 
-    // all objects representations stored to file will take up a positive
-    // integer multiple of PIPE_BUF.
-    // each page must start with PAGE_BEGIN and end with
-    // PAGE_END, all object representations shall begin with a long containing the
-    // object sequence number of that object (obtained by calling
-    // objectSequenceNumber.getAndIncrement()) followed by OBJECT_BEGIN and end with
-    // OBJECT_END
-    // If OBJECT_END occurs before the end of the page, the remainder of the page
-    // must be filled with zeroes up to PAGE_END if object end occurs less than 4 bytes
-    // before PAGE_END as many bytes of OBJECT_END as can be written in that page shall
-    // be written and the rest will be written on the next page, followed by zeroes up
-    // until PAGE_END of the following page
+  // all objects representations stored to file will take up a positive
+  // integer multiple of PIPE_BUF.
+  // each page must start with PAGE_BEGIN and end with
+  // PAGE_END, all object representations shall begin with a long containing the
+  // object sequence number of that object (obtained by calling
+  // objectSequenceNumber.getAndIncrement()) followed by a long containing the
+  // remaining serialized object data (this means that we know for sure when
+  // we're at the last page, and if so how much of the last page contains actual data,
+  // plus if we decide to use UDP then we have ordering built in.
+  // This is followed by OBJECT_BEGIN and then data, ending with OBJECT_END
+  // once we've writte out all the data in the object, whether or not we'e
+  // filled up the entire page.
+  // If OBJECT_END occurs before the end of the page, the remainder of the page
+  // must be filled with zeroes up to PAGE_END if object end occurs less than 4 bytes
+  // before PAGE_END it shall overwrite the bytes of PAGE_END
 
     // hacky nonsense, should be dynamically determined
     // based on the underlying filesystem, but using ext3 for now
