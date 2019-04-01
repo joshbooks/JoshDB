@@ -18,12 +18,12 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
  *
  * So what we need is a data stucture a bit like a list in that it can be
  * dynamically resized. But unlike a list, it need never shrink and writes to
- * a given offset will walways contain identical data.
+ * a given offset will always contain identical data.
  *
- * In the spirit of JoshDB we'll make it totally nonblocking, and the core
- * systemsy bits should be really efficient, but the mathy bits are kinda
- * whatever, we can always go back and optimize them if we ever feel like it
- * or if a profiler ever tells us that they're actually a problem.
+ * This should be more generic but I would sooner step on a lego than
+ * submit myself to the boxing and unboxing inherent in java generics
+ * for this application, it feels like stealing Trove's templating
+ * would be a boon here.
  */
 public class AtomicResizingLongArray
 {
