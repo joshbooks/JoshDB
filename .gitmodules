@@ -1,0 +1,3 @@
+[submodule "jniUtil"]
+	path = jniUtil
+	url = https://github.com/joshbooks/jniUtil.git
