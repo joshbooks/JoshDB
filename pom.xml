@@ -34,7 +34,21 @@
                             <executable>${basedir}/jniUtil/jniMake.sh</executable>
                         </configuration>
                     </execution>
-                    <execution><!-- copy jni lib to resources dir -->
+                    <execution><!-- move jni lib to resources dir -->
+                        <id>copy JNI lib</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>mv</executable>
+                            <arguments>
+                                <argument>target/classes/jniUtilLib.solib</argument>
+                                <argument>resources/</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution><!-- copy jni lib to root dir -->
                         <id>copy JNI lib</id>
                         <phase>generate-sources</phase>
                         <goals>
@@ -43,8 +57,8 @@
                         <configuration>
                             <executable>cp</executable>
                             <arguments>
-                                <argument>jniUtilLib.solib</argument>
-                                <argument>resources/</argument>
+                                <argument>resources/jniUtilLib.solib</argument>
+                                <argument>./</argument>
                             </arguments>
                         </configuration>
                     </execution>
