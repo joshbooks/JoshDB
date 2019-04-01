@@ -4,10 +4,52 @@
     <groupId>org.josh.JoshDB</groupId>
     <artifactId>JoshDB</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
     <build>
         <sourceDirectory>main/src</sourceDirectory>
         <testSourceDirectory>test/src</testSourceDirectory>
+        <resources>
+            <resource>
+                <directory>resources</directory>
+            </resource>
+        </resources>
         <plugins>
+            <plugin>
+                <artifactId>exec-maven-plugin</artifactId>
+                <groupId>org.codehaus.mojo</groupId>
+                <version>1.6.0</version>
+                <executions>
+                    <execution><!-- Run our jni build script -->
+                        <id>JNI Make</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>${basedir}/jniUtil/jniMake.sh</executable>
+                        </configuration>
+                    </execution>
+                    <execution><!-- copy jni lib to resources dir -->
+                        <id>copy JNI lib</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>cp</executable>
+                            <arguments>
+                                <argument>jniUtilLib.solib</argument>
+                                <argument>resources/</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -21,6 +63,11 @@
     </build>
     <packaging>jar</packaging>
     <dependencies>
+        <dependency>
+            <groupId>com.github.adamheinrich</groupId>
+            <artifactId>native-utils</artifactId>
+            <version>master-SNAPSHOT</version>
+        </dependency>
         <dependency>
             <groupId>com.lmax</groupId>
             <artifactId>disruptor</artifactId>

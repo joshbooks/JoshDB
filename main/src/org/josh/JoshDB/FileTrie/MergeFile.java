@@ -1,5 +1,6 @@
 package org.josh.JoshDB.FileTrie;
 
+import cz.adamh.utils.NativeUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.LoggerFactory;
 
@@ -18,19 +19,22 @@ public class MergeFile
 {
     static
     {
+      try
+      {
+        NativeUtils.loadLibraryFromJar("/resources/jniUtilLib.solib");
+      }
+      catch (IOException e)
+      {
         try
         {
-            System.load("/home/flatline/src/JoshDB/jniUtilLib.solib");
+          System.load("/home/flatline/src/JoshDB/jniUtilLib.solib");
         }
-        catch (UnsatisfiedLinkError e)
+        catch (UnsatisfiedLinkError ule)
         {
-            // TODO I guess NativeUtils is going to be the best way to
-            // load a jni lib from a jar, then have System.load as a fallback
-            // for testing. A static block with that logic seems like something
-            // that could be automagically inserted with a bach script :D
-            System.out.println("Couldn't load native lib");
-            System.exit(1);
+          System.out.println("Couldn't load native lib");
+          System.exit(1);
         }
+      }
     }
 
   // all objects representations stored to file will take up a positive
