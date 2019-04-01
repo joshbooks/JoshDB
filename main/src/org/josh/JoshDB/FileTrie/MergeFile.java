@@ -5,10 +5,13 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 
 public class MergeFile
@@ -59,6 +62,26 @@ public class MergeFile
 
   public static final byte[] PAGE_END = new byte[]{'z', '/', 'o', 's'};
 
+  // Where does the PAGE_BEGIN go?
+  public static final int PAGE_BEGIN_POS = 0;
+  public static final int PAGE_BEGIN_END_POS = PAGE_BEGIN_POS + PAGE_BEGIN.length;
+  public static final int PAGE_BEGIN_LENGTH = PAGE_BEGIN.length;
+
+  // Where does the sequence number go?
+  public static final int SEQUENCE_NUMBER_POS = PAGE_BEGIN_END_POS;
+  public static final int SEQUENCE_NUMBER_END_POS = SEQUENCE_NUMBER_POS + Long.BYTES;
+  public static final int SEQUENCE_NUMBER_LENGTH = Long.BYTES;
+
+  // Where does the amount remaining go?
+  public static final int AMOUNT_REMAINING_POS = SEQUENCE_NUMBER_END_POS;
+  public static final int AMOUNT_REMAINING_END_POS = AMOUNT_REMAINING_POS + Integer.BYTES;
+  public static final int AMOUNT_REMAINING_LENGTH = Integer.BYTES;
+
+  // Where does the OBJECT_BEGIN go?
+  public static final int OBJECT_BEGIN_POS = AMOUNT_REMAINING_END_POS;
+  public static final int OBJECT_BEGIN_END_POS = OBJECT_BEGIN_POS + OBJECT_BEGIN.length;
+  public static final int OBJECT_BEGIN_LENGTH = OBJECT_BEGIN.length;
+
   private final Path file;
   private final AtomicResizingLongArray sequenceArray;
   private ThreadLocal<Long> fd = new ThreadLocal<>();
@@ -75,7 +98,7 @@ public class MergeFile
   long appendToFileHelper(byte[] bytes) throws IOException
   {
       assert bytes.length <= PIPE_BUF;
-      System.out.println("starting with fd " + fd.get());
+//      System.out.println("starting with fd " + fd.get());
       if (fd.get() == null || fd.get() <= 0)
       {
         fd.set(openFile(file.toAbsolutePath().normalize().toString()));
@@ -103,6 +126,15 @@ public class MergeFile
   // todo we don't do iterating anymore, that changes some things
   private static NonBlockingHashMap<Path, MergeFile> registry =
           new NonBlockingHashMap<>();
+
+  // So I think the ultimate idea is to have a thread pool doing all the IO
+  // so what we want is a worker thread function fed off someting like a queue
+  // (disruptor anyone?) and any thread may write to any file at any time
+  // and come to think about it if we have one big disruptor for all the stages
+  // of the databases (write ahead?, confirm write ahead by other nodes?,
+  // perform update in memory?, tell other nodes what the result is?, return result?),
+  // this whole thing can be kept largely copy free
+  // (after I optimize the crap out of the code in this file of course [sys/uio.h FTW!])
 
   private static org.slf4j.Logger log = LoggerFactory.getLogger(MergeFile.class.getName());
 
@@ -144,9 +176,155 @@ public class MergeFile
         this.sequenceArray = sequenceArrayForPath(file);
     }
 
+    NonBlockingHashMap
+    <
+      Long,
+      AtomicReference<PageInfo.BasicPageInfo[]>
+    >
+    sequenceNumberToPageInfoList =
+      new NonBlockingHashMap<>();
+
+    boolean addPageInfo(byte[] page, long offset)
+    {
+      long sequenceNumber = sequenceNumberOfPage(page);
+
+      PageInfo.BasicPageInfo pageInfo =
+        PageInfo.basicInfoFromPage(page, offset);
+
+      AtomicReference<PageInfo.BasicPageInfo[]> pageInfoArrAtomRef =
+        new AtomicReference<>(null);
+
+      AtomicReference<PageInfo.BasicPageInfo[]> temp =
+        sequenceNumberToPageInfoList
+          .putIfAbsent(sequenceNumber, pageInfoArrAtomRef);
+
+      PageInfo.BasicPageInfo[] singletonPageInfoArr =
+        new PageInfo.BasicPageInfo[]{ pageInfo };
+
+      if (temp != null)
+      {
+        pageInfoArrAtomRef = temp;
+      }
+
+      while (pageInfoArrAtomRef.get() == null)
+      {
+        if
+        (
+          pageInfoArrAtomRef
+            .compareAndSet
+            (
+              null,
+              singletonPageInfoArr
+            )
+        )
+        {
+          return true;
+        }
+      }
+
+      PageInfo.BasicPageInfo[] currentPageInfoArr;
+      PageInfo.BasicPageInfo[] mergedArr;
+
+      do
+      {
+        currentPageInfoArr = pageInfoArrAtomRef.get();
+         mergedArr =
+          mergeArrs
+          (
+            currentPageInfoArr,
+            singletonPageInfoArr
+          );
+
+         if (currentPageInfoArr.length == mergedArr.length)
+         {
+           return false;
+         }
+      } while (!pageInfoArrAtomRef.compareAndSet(currentPageInfoArr, mergedArr));
+
+      return true;
+    }
+
+  private PageInfo.BasicPageInfo[] mergeArrs(PageInfo.BasicPageInfo[] arrOne, PageInfo.BasicPageInfo[] arrTwo)
+  {
+    // iterate through both to find length of merged arr (weed out dups)
+    int arrOneIt = 0;
+    int arrTwoIt = 0;
+    int uniqueLength = 0;
+    for
+    (
+      int i = arrOneIt + arrTwoIt;
+      i < arrOne.length + arrTwo.length;
+      i = arrOneIt + arrTwoIt
+    )
+    {
+      if (arrOneIt == arrOne.length)
+      {
+        arrTwoIt++;
+        uniqueLength++;
+      }
+      else if (arrTwoIt == arrTwo.length)
+      {
+        arrOneIt++;
+        uniqueLength++;
+      }
+      else if (arrOne[arrOneIt].amountRemaining == arrTwo[arrTwoIt].amountRemaining)
+      {
+        // discard from arrTwo when there is a dup
+        arrTwoIt++;
+      }
+      else if (arrOne[arrOneIt].amountRemaining > arrTwo[arrTwoIt].amountRemaining)
+      {
+        arrOneIt++;
+        uniqueLength++;
+      }
+      else
+      {
+        arrTwoIt++;
+        uniqueLength++;
+      }
+    }
+
+    PageInfo.BasicPageInfo[] mergedArr = new PageInfo.BasicPageInfo[uniqueLength];
+
+    // iterate through both arrays to do merge
+    arrOneIt = 0;
+    arrTwoIt = 0;
+    int mergePos = 0;
+    for
+    (
+      int i = arrOneIt + arrTwoIt;
+      i < arrOne.length + arrTwo.length;
+      i = arrOneIt + arrTwoIt
+    )
+    {
+      if (arrOneIt == arrOne.length)
+      {
+        mergedArr[mergePos++] = arrTwo[arrTwoIt++];
+      }
+      else if (arrTwoIt == arrTwo.length)
+      {
+        mergedArr[mergePos++] = arrOne[arrOneIt++];
+      }
+      else if (arrOne[arrOneIt].amountRemaining == arrTwo[arrTwoIt].amountRemaining)
+      {
+        // discard from arrTwo when there is a dup
+        arrTwoIt++;
+      }
+      else if (arrOne[arrOneIt].amountRemaining > arrTwo[arrTwoIt].amountRemaining)
+      {
+        mergedArr[mergePos++] = arrOne[arrOneIt++];
+      }
+      else
+      {
+        mergedArr[mergePos++] = arrTwo[arrTwoIt++];
+      }
+    }
+
+    return mergedArr;
+  }
 
 
-    static int numberOfPagesForSerializedObject(int length)
+  static int numberOfPagesForSerializedObject(int length)
     {
       // long is for sequence number, integer is for remaining length
       int usabePageLength =
@@ -158,15 +336,21 @@ public class MergeFile
       int numPages = length / usabePageLength;
       numPages += length % usabePageLength != 0 ? 1 : 0;
 
-      System.out.println("Expected number of pages for " + length + " is " + numPages);
+//      System.out.println("Expected number of pages for " + length + " is " + numPages);
 
       return numPages;
     }
 
+    static int amountRemainingForPage(byte[] page)
+    {
+      assert page.length == PIPE_BUF;
+      return ByteBuffer.wrap(page, AMOUNT_REMAINING_POS, AMOUNT_REMAINING_LENGTH).getInt();
+    }
 
     static long sequenceNumberOfPage(byte[] page)
     {
-        return ByteBuffer.wrap(page, 4, 12).getLong();
+        assert page.length == PIPE_BUF;
+        return ByteBuffer.wrap(page, SEQUENCE_NUMBER_POS, SEQUENCE_NUMBER_LENGTH).getLong();
     }
 
 
@@ -243,8 +427,8 @@ public class MergeFile
             int dataInPage = PIPE_BUF - objectDataBegin - PAGE_END.length;
 
             // extract metadata
-            long pageSequenceNumber = ByteBuffer.wrap(delimitedPage, 4, 12).getLong();
-            int remainingLength = ByteBuffer.wrap(delimitedPage, 12, 16).getInt();
+            long pageSequenceNumber = ByteBuffer.wrap(delimitedPage, SEQUENCE_NUMBER_POS, SEQUENCE_NUMBER_LENGTH).getLong();
+            int remainingLength = ByteBuffer.wrap(delimitedPage, AMOUNT_REMAINING_POS, AMOUNT_REMAINING_LENGTH).getInt();
 
             if (objectSequenceNumber == -1)
             {
@@ -285,11 +469,11 @@ public class MergeFile
     static boolean isMemberOfObject(byte[] page, long sequenceNumber)
     {
         assert
-            ByteBuffer.wrap(page, 0, 4).getInt()
+            ByteBuffer.wrap(page, PAGE_BEGIN_POS, PAGE_BEGIN_LENGTH).getInt()
             ==
             PAGE_BEGIN_INT;
 
-        return ByteBuffer.wrap(page, 4, 8).getLong() == sequenceNumber;
+        return ByteBuffer.wrap(page, SEQUENCE_NUMBER_POS, SEQUENCE_NUMBER_LENGTH).getLong() == sequenceNumber;
     }
 
     // So this is not great for caching, not a great design long term, but
@@ -297,9 +481,9 @@ public class MergeFile
     static byte[] delimitedPage(long sequenceNumber, int remainingLength)
     {
         byte[] page = new byte[PIPE_BUF];
-        System.arraycopy(PAGE_BEGIN, 0, page, 0, PAGE_BEGIN.length);
-        ByteBuffer.wrap(page, 4, 12).putLong(sequenceNumber);
-        ByteBuffer.wrap(page, 12, 16).putInt(remainingLength);
+        System.arraycopy(PAGE_BEGIN, PAGE_BEGIN_POS, page, 0, PAGE_BEGIN.length);
+        ByteBuffer.wrap(page, SEQUENCE_NUMBER_POS, SEQUENCE_NUMBER_LENGTH).putLong(sequenceNumber);
+        ByteBuffer.wrap(page, AMOUNT_REMAINING_POS, AMOUNT_REMAINING_LENGTH).putInt(remainingLength);
 
         System
           .arraycopy
@@ -312,6 +496,77 @@ public class MergeFile
           );
 
         return page;
+    }
+
+    ThreadLocal<SeekableByteChannel> byteChannelForThread = new ThreadLocal<>();
+
+    SeekableByteChannel getByteChannel() throws IOException
+    {
+      SeekableByteChannel existing = byteChannelForThread.get();
+
+      if (existing == null)
+      {
+        existing = Files.newByteChannel(file);
+        byteChannelForThread.set(existing);
+      }
+
+      return existing;
+    }
+
+    // this method is twice as stupid as nextPage as the type it returns must be null checked
+    // and it removes context by obscuring the type of exception
+    // thrown and doing what it thinks is a sensible default, to do this in private code
+    // is reasonable but to do it in an interface is dogma.
+    byte[] nextPageRetNullOnError()
+    {
+      try
+      {
+        return nextPage();
+      }
+      catch (IOException e)
+      {
+        log.error("Encountered error: " + e.getMessage());
+        e.printStackTrace();
+        return null;
+      }
+    }
+
+    // this is a really stupid method, it gives you no control over
+    // allocation and no idea what you're reading but it seems like
+    // we ought to start out doing stupid things that work well
+    // rather than smart things that don't
+    byte[] nextPage() throws IOException
+    {
+      byte[] buffer = new byte[PIPE_BUF];
+
+      int retVal = readPage(getByteChannel(), buffer);
+
+      if (retVal < 0)
+      {
+        throw new IOException("Read returned a negative value, that seems like a bad thing");
+      }
+      else if (retVal != PIPE_BUF)
+      {
+        throw new  IOException("Did not read " + PIPE_BUF + " from file. That makes no sense");
+      }
+
+      return buffer;
+    }
+
+
+    int readPage(SeekableByteChannel fileStream, byte[] buffer) throws IOException
+    {
+      assert buffer.length == PIPE_BUF;
+
+      long pageOffset = fileStream.position();
+
+      int retVal = fileStream.read(ByteBuffer.wrap(buffer));
+
+      // might want to move some error handling in here
+      // to get better assurances about validity of page info
+      addPageInfo(buffer, pageOffset);
+
+      return retVal;
     }
 
     //ok, let's try writing a new version of this while I'm like mostly sober
@@ -348,11 +603,11 @@ public class MergeFile
         }
 
 
-        System.out.println("params are: serializedObject: "+ serializedObject +", \n" +
-                           "objectPosition: "+ objectPosition +", \n" +
-                           "page,: "+ page +" \n" +
-                           "pagePosition: "+ pagePosition +", \n" +
-                           "availableSpace: "+ availableSpace );
+//        System.out.println("params are: serializedObject: "+ serializedObject +", \n" +
+//                           "objectPosition: "+ objectPosition +", \n" +
+//                           "page,: "+ page +" \n" +
+//                           "pagePosition: "+ pagePosition +", \n" +
+//                           "availableSpace: "+ availableSpace );
 
         int remainingObjectLength = serializedObject.length - objectPosition;
 
@@ -396,6 +651,7 @@ public class MergeFile
         delimitedPages.add(i, page);
       }
 
+      assert delimitedPages.size() == numberOfPagesForSerializedObject(serializedObject.length);
       return delimitedPages;
     }
 
