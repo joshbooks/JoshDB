@@ -35,7 +35,7 @@
                         </configuration>
                     </execution>
                     <execution><!-- move jni lib to resources dir -->
-                        <id>copy JNI lib</id>
+                        <id>move JNI lib</id>
                         <phase>generate-sources</phase>
                         <goals>
                             <goal>exec</goal>
