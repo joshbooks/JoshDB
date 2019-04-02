@@ -211,7 +211,7 @@ public class MergeFile
         if (pageInfoArr.length == 1)
         {
           // and only
-          if (pageInfoArr[0].pageType != PageInfo.PageType.Only)
+          if (pageInfoArr[0].pageType == PageInfo.PageType.Only)
           {
             return true;
           }
@@ -269,9 +269,67 @@ public class MergeFile
           prevDataSegmentLength = PIPE_BUF - 16;
         }
 
-
         return false;
       }
+    }
+
+    byte[] getObject(long sequenceNumber) throws IOException
+    {
+      AtomicReference<PersistedObjectInfo> atomicObjectInfo =
+        sequenceNumberToPageInfoList.get(sequenceNumber);
+      PersistedObjectInfo objectInfo =
+        atomicObjectInfo == null
+          ? null
+          : atomicObjectInfo.get();
+
+      int pageNumber = 0;
+
+      List<byte[]> delimitedPages = new ArrayList<>();
+
+      for (PageInfo.BasicPageInfo pageInfo : (objectInfo == null ? new PageInfo.BasicPageInfo[]{} : objectInfo.pageInfoArr))
+      {
+        getByteChannel().position(pageInfo.offset);
+
+        byte[] nextPage = nextPageRetNullOnError();
+
+        if (nextPage == null)
+        {
+          throw new IOException("Something really dreadful has occurred, please check yourself before you corrupt yourself further");
+        }
+
+        delimitedPages.add(nextPage());
+      }
+
+      atomicObjectInfo =
+        sequenceNumberToPageInfoList.get(sequenceNumber);
+      objectInfo =
+        atomicObjectInfo == null
+          ? null
+          : atomicObjectInfo.get();
+
+      while (objectInfo == null || !objectInfo.isPageArrComplete())
+      {
+        byte[] nextPage = nextPageRetNullOnError();
+
+        if (nextPage == null)
+        {
+          throw new IOException("Something really dreadful has occurred, please check yourself before you corrupt yourself further");
+        }
+
+        if (sequenceNumberOfPage(nextPage) == sequenceNumber)
+        {
+          delimitedPages.add(nextPage);
+        }
+
+        atomicObjectInfo =
+          sequenceNumberToPageInfoList.get(sequenceNumber);
+        objectInfo =
+          atomicObjectInfo == null
+            ? null
+            : atomicObjectInfo.get();
+      }
+
+      return undelimitedObject(delimitedPages);
     }
 
     NonBlockingHashMap
@@ -347,7 +405,7 @@ public class MergeFile
 
       return true;
     }
-    
+
   private PageInfo.BasicPageInfo[] mergeArrs(PageInfo.BasicPageInfo[] arrOne, PageInfo.BasicPageInfo[] arrTwo)
   {
     // iterate through both to find length of merged arr (weed out dups)
