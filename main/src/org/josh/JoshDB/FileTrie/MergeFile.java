@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -181,10 +182,102 @@ public class MergeFile
         this.sequenceArray = sequenceArrayForPath(file);
     }
 
+    static class PersistedObjectInfo
+    {
+      private boolean isPageArrComplete;
+
+      public boolean isPageArrComplete()
+      {
+        return isPageArrComplete;
+      }
+
+      PersistedObjectInfo(PageInfo.BasicPageInfo[] pageInfoArr)
+      {
+        this.pageInfoArr = pageInfoArr;
+        isPageArrComplete = computePageArrComplete();
+      }
+
+      PageInfo.BasicPageInfo[] pageInfoArr;
+
+      private boolean computePageArrComplete()
+      {
+        // pretty obvious
+        if (pageInfoArr == null || pageInfoArr.length == 0)
+        {
+          return false;
+        }
+
+        // The one and not only
+        if (pageInfoArr.length == 1)
+        {
+          // and only
+          if (pageInfoArr[0].pageType != PageInfo.PageType.Only)
+          {
+            return true;
+          }
+          else //and lonely
+          {
+            return false;
+          }
+        }
+
+        // otherwise it should end at the end
+        if (pageInfoArr[pageInfoArr.length -1].pageType != PageInfo.PageType.End)
+        {
+          return false;
+        }
+
+        // and begin at the beginning
+        if (pageInfoArr[0].pageType != PageInfo.PageType.Beginning)
+        {
+          return false;
+        }
+
+        // intellij is too dumb to know these don't need initializing,
+        // so the java compiler is probably too dumb to make good
+        // optimizations. Ought to make nicer.
+        int prevAmountRemaining = 0, prevDataSegmentLength = 0;
+
+        for (int  i = 0; i < pageInfoArr.length; i++)
+        {
+          if (i == 0)
+          {
+            if (pageInfoArr[i].pageType != PageInfo.PageType.Beginning)
+            {
+              return false;
+            }
+            prevAmountRemaining = pageInfoArr[i].amountRemaining;
+            // TODO this should be a well commented constant ( see similar comment elsewhere)
+            prevDataSegmentLength = PIPE_BUF - 20;
+
+            // we know there will always be an end
+            continue;
+          }
+
+          if ((prevAmountRemaining - pageInfoArr[i].amountRemaining) > prevDataSegmentLength)
+          {
+            return false;
+          }
+
+          if (pageInfoArr[i].pageType == PageInfo.PageType.End)
+          {
+            return true;
+          }
+
+          prevAmountRemaining = pageInfoArr[i].amountRemaining;
+
+          prevDataSegmentLength = PIPE_BUF - 16;
+        }
+
+
+        return false;
+      }
+    }
+
     NonBlockingHashMap
     <
       Long,
-      AtomicReference<PageInfo.BasicPageInfo[]>
+      AtomicReference<PersistedObjectInfo>
     >
     sequenceNumberToPageInfoList =
       new NonBlockingHashMap<>();
@@ -192,34 +285,35 @@ public class MergeFile
     boolean addPageInfo(byte[] page, long offset)
     {
       long sequenceNumber = sequenceNumberOfPage(page);
-
       PageInfo.BasicPageInfo pageInfo =
         PageInfo.basicInfoFromPage(page, offset);
 
-      AtomicReference<PageInfo.BasicPageInfo[]> pageInfoArrAtomRef =
+      AtomicReference<PersistedObjectInfo> persistedInfoArrAtomRef =
         new AtomicReference<>(null);
-
-      AtomicReference<PageInfo.BasicPageInfo[]> temp =
-        sequenceNumberToPageInfoList
-          .putIfAbsent(sequenceNumber, pageInfoArrAtomRef);
-
       PageInfo.BasicPageInfo[] singletonPageInfoArr =
-        new PageInfo.BasicPageInfo[]{ pageInfo };
+      new PageInfo.BasicPageInfo[]{ pageInfo };
+
+      PersistedObjectInfo singletonPersistedInfo =
+        new PersistedObjectInfo(singletonPageInfoArr);
+
+      AtomicReference<PersistedObjectInfo> temp =
+        sequenceNumberToPageInfoList
+          .putIfAbsent(sequenceNumber, persistedInfoArrAtomRef);
 
       if (temp != null)
       {
-        pageInfoArrAtomRef = temp;
+        persistedInfoArrAtomRef = temp;
       }
 
-      while (pageInfoArrAtomRef.get() == null)
+      while (persistedInfoArrAtomRef.get() == null)
       {
         if
         (
-          pageInfoArrAtomRef
+          persistedInfoArrAtomRef
             .compareAndSet
             (
               null,
-              singletonPageInfoArr
+              singletonPersistedInfo
             )
         )
         {
@@ -228,11 +322,14 @@ public class MergeFile
       }
 
       PageInfo.BasicPageInfo[] currentPageInfoArr;
+      PersistedObjectInfo currentObjectInfo;
       PageInfo.BasicPageInfo[] mergedArr;
+      PersistedObjectInfo mergedObjectInfo;
 
       do
       {
-        currentPageInfoArr = pageInfoArrAtomRef.get();
+        currentObjectInfo = persistedInfoArrAtomRef.get();
+        currentPageInfoArr = currentObjectInfo.pageInfoArr;
          mergedArr =
           mergeArrs
           (
@@ -240,15 +337,17 @@ public class MergeFile
             singletonPageInfoArr
           );
 
+         mergedObjectInfo = new PersistedObjectInfo(mergedArr);
+
          if (currentPageInfoArr.length == mergedArr.length)
          {
            return false;
          }
-      } while (!pageInfoArrAtomRef.compareAndSet(currentPageInfoArr, mergedArr));
+      } while (!persistedInfoArrAtomRef.compareAndSet(currentObjectInfo, mergedObjectInfo));
 
       return true;
     }
-
+    
   private PageInfo.BasicPageInfo[] mergeArrs(PageInfo.BasicPageInfo[] arrOne, PageInfo.BasicPageInfo[] arrTwo)
   {
     // iterate through both to find length of merged arr (weed out dups)
