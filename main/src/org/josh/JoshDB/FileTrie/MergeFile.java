@@ -10,6 +10,7 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -156,22 +157,22 @@ public class MergeFile
       return shared;
   }
 
-    private static final NonBlockingHashMap<Path, AtomicResizingLongArray> pathToSequenceArray =
-            new NonBlockingHashMap<>();
+  private static final NonBlockingHashMap<Path, AtomicResizingLongArray> pathToSequenceArray =
+          new NonBlockingHashMap<>();
 
-    public static AtomicResizingLongArray sequenceArrayForPath(Path path)
+  public static AtomicResizingLongArray sequenceArrayForPath(Path path)
+  {
+    AtomicResizingLongArray temp = new AtomicResizingLongArray();
+
+    AtomicResizingLongArray shared = pathToSequenceArray.putIfAbsent(path, temp);
+
+    if (shared == null)
     {
-        AtomicResizingLongArray temp = new AtomicResizingLongArray();
-
-        AtomicResizingLongArray shared = pathToSequenceArray.putIfAbsent(path, temp);
-
-        if (shared == null)
-        {
-            shared = temp;
-        }
-
-        return shared;
+        shared = temp;
     }
+
+    return shared;
+  }
 
 
     private MergeFile(Path file)
@@ -329,37 +330,98 @@ public class MergeFile
 
 
   static int numberOfPagesForSerializedObject(int length)
-    {
-      // long is for sequence number, integer is for remaining length
-      int usabePageLength =
-        PIPE_BUF - PAGE_END.length
-        - PAGE_BEGIN.length - Long.BYTES - Integer.BYTES;
+  {
+    // long is for sequence number, integer is for remaining length
+    int usabePageLength =
+      PIPE_BUF - PAGE_END.length
+      - PAGE_BEGIN.length - Long.BYTES - Integer.BYTES;
 
-      length += OBJECT_BEGIN.length + OBJECT_END.length;
+    length += OBJECT_BEGIN.length + OBJECT_END.length;
 
-      int numPages = length / usabePageLength;
-      numPages += length % usabePageLength != 0 ? 1 : 0;
+    int numPages = length / usabePageLength;
+    numPages += length % usabePageLength != 0 ? 1 : 0;
 
 //      System.out.println("Expected number of pages for " + length + " is " + numPages);
 
-      return numPages;
-    }
+    return numPages;
+  }
 
-    static int amountRemainingForPage(byte[] page)
+  static int amountRemainingForPage(byte[] page)
+  {
+    assert page.length == PIPE_BUF;
+    return ByteBuffer.wrap(page, AMOUNT_REMAINING_POS, AMOUNT_REMAINING_LENGTH).getInt();
+  }
+
+  static long sequenceNumberOfPage(byte[] page)
+  {
+    assert page.length == PIPE_BUF;
+    return ByteBuffer.wrap(page, SEQUENCE_NUMBER_POS, SEQUENCE_NUMBER_LENGTH).getLong();
+  }
+
+  public static PageInfo.PageType typeOfPage(byte[] page)
+  {
+    boolean isBegin = isObjectBegin(page);
+    boolean isEnd = isObjectEnd(page);
+    if (isEnd && isBegin)
     {
-      assert page.length == PIPE_BUF;
-      return ByteBuffer.wrap(page, AMOUNT_REMAINING_POS, AMOUNT_REMAINING_LENGTH).getInt();
+      return PageInfo.PageType.Only;
     }
-
-    static long sequenceNumberOfPage(byte[] page)
+    else if (isBegin)
     {
-        assert page.length == PIPE_BUF;
-        return ByteBuffer.wrap(page, SEQUENCE_NUMBER_POS, SEQUENCE_NUMBER_LENGTH).getLong();
+      return PageInfo.PageType.Beginning;
+    }
+    else if (isEnd)
+    {
+      return PageInfo.PageType.End;
+    }
+    else
+    {
+      return PageInfo.PageType.Middle;
+    }
+  }
+
+  static boolean isObjectBegin(byte[] page)
+  {
+    return
+      ByteBuffer
+        .wrap
+        (
+          page,
+          OBJECT_BEGIN_POS,
+          OBJECT_BEGIN_LENGTH
+        )
+          .getInt()
+          ==
+          OBJECT_BEGIN_INT;
+  }
+
+  static boolean isObjectEnd(byte[] page)
+  {
+    int amountRemaining = amountRemainingForPage(page);
+    boolean isObjectBegin = isObjectBegin(page);
+
+    // the maximum amount remaining we could have for this to be and end page
+    int maxForEnd =
+      PIPE_BUF
+      -                     // ----- no OBJECT_END because that's allowed to
+      (                     // overwrite the identically sized PAGE_END -----
+        Integer.BYTES       // amount remaining
+        + Long.BYTES        // sequence number
+        + PAGE_BEGIN.length // PAGE_BEGIN
+        + PAGE_END.length   // PAGE_END
+      );
+
+    if (isObjectBegin)
+    {
+      maxForEnd -= + OBJECT_BEGIN.length;
     }
 
+    return amountRemaining <= maxForEnd;
+  }
 
-    public static final NonBlockingHashMap<Path, AtomicLong> objectCountForFile =
-            new NonBlockingHashMap<>();
+
+  public static final NonBlockingHashMap<Path, AtomicLong> objectCountForFile =
+          new NonBlockingHashMap<>();
 
     /**
      * Every time you want to write an object to a MergeFile, you just
