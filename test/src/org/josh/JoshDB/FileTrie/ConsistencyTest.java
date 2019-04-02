@@ -4,14 +4,10 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.BufferedReader;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
@@ -60,7 +56,7 @@ public class ConsistencyTest
         }
     }
 
-    static void writeThreadFunction()
+    private static void writeThreadFunction()
     {
         int myThreadNumber = threadNumber.getAndIncrement();
 
@@ -148,22 +144,33 @@ public class ConsistencyTest
     // for use with testReadWriteObjectConsistency and associated methods
     private AtomicReferenceArray<Boolean> readSuccesses;
 
-    private static final byte[] readWriteTestObject = new byte[MergeFile.PIPE_BUF * 7];
+    private static final byte[] readWriteTestObject = new byte[MergeFile.PIPE_BUF * 21];
     static
     {
       Arrays.fill(readWriteTestObject, (byte) 69);
     }
+    private static final List<List<byte[]>> delimitedReadWritePagesList = new ArrayList<>();
+
+    private static final int numThreads = 0x20;
+    static
+    {
+      for (int i = 0; i < numThreads; i++)
+      {
+        delimitedReadWritePagesList
+          .add
+          (
+            MergeFile.delimitedObject(readWriteTestObject, (long) i)
+          );
+      }
+    }
 
     private void writeObjectThreadFunction()
     {
-      // might want to compute these before starting threads to increase contention
+      long objectSequenceNumber =
+        MergeFile.getObjectCount(testLocus).getAndIncrement();
+
       List<byte[]> delimitedPages =
-        MergeFile
-          .delimitedObject
-          (
-            readWriteTestObject,
-            MergeFile.getObjectCount(testLocus).getAndIncrement()
-          );
+        delimitedReadWritePagesList.get((int) objectSequenceNumber);
 
       for (byte[] page : delimitedPages)
       {
@@ -179,9 +186,9 @@ public class ConsistencyTest
       }
     }
 
-    private void readObjectThreadFunction(int numThreads)
+    private void readObjectThreadFunction()
     {
-      byte[] nextPage = null;
+      byte[] nextPage;
 
       HashMap<Long, List<byte[]>> sequenceNumberToPageList =
         new HashMap<>();
@@ -198,7 +205,7 @@ public class ConsistencyTest
 
         long sequenceNumberForPage =
           MergeFile.sequenceNumberOfPage(nextPage);
-        if (sequenceNumberForPage > numThreads || sequenceNumberForPage < 0)
+        if (sequenceNumberForPage > ConsistencyTest.numThreads || sequenceNumberForPage < 0)
         {
           System.out.println("Got an invalid sequence number " + sequenceNumberForPage);
         }
@@ -216,7 +223,7 @@ public class ConsistencyTest
 
       }
 
-      for (int i = 0 ; i < numThreads; i++)
+      for (int i = 0; i < ConsistencyTest.numThreads; i++)
       {
         List<byte[]> pageList =
           sequenceNumberToPageList.get((long) i);
@@ -281,13 +288,11 @@ public class ConsistencyTest
     @Test
     public void testReadWriteObjectConsistency()
     {
-      int numThreads = 0x20;
-
       readSuccesses = new AtomicReferenceArray<>(numThreads);
 
       startAndJoinThreads(numThreads, this::writeObjectThreadFunction);
 
-      startAndJoinThreads(numThreads, () -> readObjectThreadFunction(numThreads));
+      startAndJoinThreads(numThreads, this::readObjectThreadFunction);
 
       boolean globalSuccess = true;
       for (int i = 0; i < numThreads; i++)
@@ -300,6 +305,106 @@ public class ConsistencyTest
       }
 
       assert globalSuccess;
+    }
+
+    @Test
+    public void testSingleThreadedMetadataConsistency()
+    {
+      byte[][]
+    }
+
+    @Test
+    public void testReadWriteMetadataConsistency()
+    {
+      byte[][] testArray = new byte[0x20][];
+      // todo better source of entropy
+      Random random = new Random();
+
+      for (int i = 0; i < testArray.length; i++)
+      {
+        testArray[i] = new byte[random.nextInt(0x69)];
+        random.nextBytes(testArray[i]);
+      }
+
+      //noinspection unchecked
+      List<byte[]>[] delimitedPageLists = new List[testArray.length];
+
+      for (int i = 0; i < testArray.length; i++)
+      {
+        delimitedPageLists[i] = MergeFile.delimitedObject(testArray[i], i);
+      }
+
+      AtomicInteger threadNumberTracker = new AtomicInteger(0);
+
+      startAndJoinThreads
+      (
+        testArray.length,
+        () ->
+        {
+          int threadNum = threadNumberTracker.getAndIncrement();
+          for (byte[] page : delimitedPageLists[threadNum])
+          {
+            try
+            {
+              MergeFile.mergeFileForPath(testLocus).appendToFileHelper(page);
+            }
+            catch (IOException e)
+            {
+              e.printStackTrace();
+              assert false;
+            }
+          }
+        }
+      );
+
+      threadNumberTracker.set(0);
+
+      // todo use readSuccesses here so we can assert false in the main thread
+      startAndJoinThreads
+      (
+        testArray.length,
+        () ->
+        {
+          int threadNum = threadNumberTracker.getAndIncrement();
+          try
+          {
+            byte[] expected = testArray[threadNum];
+            byte[] actual = MergeFile.mergeFileForPath(testLocus).getObject(threadNum);
+
+            int expectedLength = expected.length;
+            int actualLength = actual.length;
+
+            if (expectedLength != actualLength)
+            {
+              System.out.println("length mismatch");
+              assert false;
+            }
+            if
+            (
+              !
+              Arrays
+                .equals
+                (
+                  testArray[threadNum],
+                  actual
+                )
+            )
+            {
+              System.out.println("Got a mismatch for " + threadNum);
+              assert false;
+            }
+          }
+          catch (IOException e)
+          {
+            System.out.println("This is really not good");
+            System.out.println("Got a mismatch with object number " + threadNum);
+            e.printStackTrace();
+            assert false;
+          }
+
+          System.out.println("threadNum " + threadNum + " got a match");
+        }
+      );
     }
 
     @Test
