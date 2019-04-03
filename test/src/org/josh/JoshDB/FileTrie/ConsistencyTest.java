@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 public class ConsistencyTest
@@ -307,10 +308,80 @@ public class ConsistencyTest
       assert globalSuccess;
     }
 
+    // wow, single threaded is sooooo sloooooooowwww I thought the test was broken for a while
     @Test
-    public void testSingleThreadedMetadataConsistency()
+    public void testSingleThreadedMetadataConsistency() throws IOException
     {
-      byte[][]
+      MergeFile testMergreFile = MergeFile.mergeFileForPath(testLocus);
+
+      boolean globalDidFail = false;
+      for (int i = 0; i < numThreads; i++)
+      {
+        List<byte[]> delimitedObject = MergeFile.delimitedObject(readWriteTestObject, (long) i);
+
+        assert delimitedObject.size() > 1;
+
+
+        testMergreFile.appendToFileHelper(delimitedObject.get(0));
+        testMergreFile.nextPageRetNullOnError();
+
+
+        // after writing the first page the metadata should say the object
+        // is incomplete and have exactly one entry in the page list
+        AtomicReference<MergeFile.PersistedObjectInfo> atomicObjectInfo =
+          testMergreFile.sequenceNumberToPageInfoList.get((long) i);
+
+        assert atomicObjectInfo != null;
+
+        MergeFile.PersistedObjectInfo objectInfo = atomicObjectInfo.get();
+
+        assert objectInfo != null;
+
+        assert !objectInfo.isPageArrComplete();
+
+        assert objectInfo.pageInfoArr.length == 1;
+
+        for (int j = 1; j < delimitedObject.size(); j++)
+        {
+          testMergreFile.appendToFileHelper(delimitedObject.get(j));
+          testMergreFile.nextPageRetNullOnError();
+        }
+
+        // after writing all pages for an object the metadata should say that the
+        // object is complete and have all entries is the page list
+
+        atomicObjectInfo =
+          testMergreFile.sequenceNumberToPageInfoList.get((long) i);
+
+        assert atomicObjectInfo != null;
+
+        objectInfo = atomicObjectInfo.get();
+
+        boolean didFail = false;
+
+        if (objectInfo == null)
+        {
+          System.out.println("objectInfo was null for " + i + ", that's fucked");
+          didFail = true;
+        }
+
+        if (!didFail && !objectInfo.isPageArrComplete())
+        {
+          System.out.println("Object info wasn't complete for " + i+ "after writing all the pages");
+          System.out.println("so we wrote out " + delimitedObject.size() + " pages, but only " + objectInfo.pageInfoArr.length + " wound up in metadata");
+          didFail = true;
+        }
+
+        if (!didFail && objectInfo.pageInfoArr.length != delimitedObject.size())
+        {
+          System.out.println("so we wrote out " + delimitedObject.size() + " pages, but only " + objectInfo.pageInfoArr.length + " wound up in metadata");
+          didFail = true;
+        }
+
+        globalDidFail |= didFail;
+      }
+
+      assert !globalDidFail;
     }
 
     @Test
