@@ -57,6 +57,52 @@ public class ConsistencyTest
         }
     }
 
+    @After
+    public void invalidateTestFileMetadata()
+    {
+      MergeFile.mergeFileForPath(testLocus).sequenceNumberToPageInfoList.clear();
+      MergeFile.mergeFileForPath(testLocus).byteChannelForThread = new ThreadLocal<>();
+    }
+
+    static class TestThread extends Thread
+    {
+      static class TestRunnable implements Runnable
+      {
+        Runnable inner;
+
+
+        public TestRunnable(Runnable r)
+        {
+          this.inner = r;
+        }
+
+        @Override
+        public void run()
+        {
+          inner.run();
+          try
+          {
+            MergeFile.mergeFileForPath(testLocus).closeAppender();
+            MergeFile.mergeFileForPath(testLocus).closeByteChannel();
+          }
+          catch (IOException e)
+          {
+            System.out.println("Got an exception closing up: " + e.getMessage());
+          }
+        }
+      }
+
+      public TestThread(Runnable r)
+      {
+        this(new TestRunnable(r));
+      }
+
+      public TestThread(TestRunnable r)
+      {
+        super(r);
+      }
+    }
+
     private static void writeThreadFunction()
     {
         int myThreadNumber = threadNumber.getAndIncrement();
@@ -81,10 +127,10 @@ public class ConsistencyTest
     public void testWriteConsistency() throws InterruptedException
     {
         int numThreads = 0x7f;
-        Thread[] threads = new Thread[numThreads];
+        TestThread[] threads = new TestThread[numThreads];
         for (int i = 0; i < numThreads; i++)
         {
-            threads[i] = new Thread(ConsistencyTest::writeThreadFunction);
+            threads[i] = new TestThread(ConsistencyTest::writeThreadFunction);
             threads[i].start();
         }
 
@@ -260,19 +306,19 @@ public class ConsistencyTest
 
     void startAndJoinThreads(int numThreads, Runnable target)
     {
-      Thread[] threads = new Thread[numThreads];
+      TestThread[] threads = new TestThread[numThreads];
 
       for (int i = 0; i < numThreads; i++)
       {
-        threads[i] = new Thread(target);
+        threads[i] = new TestThread(target);
       }
 
-      for (Thread thread: threads)
+      for (TestThread thread: threads)
       {
         thread.start();
       }
 
-      for (Thread thread: threads)
+      for (TestThread thread: threads)
       {
         try
         {
@@ -312,7 +358,7 @@ public class ConsistencyTest
     @Test
     public void testSingleThreadedMetadataConsistency() throws IOException
     {
-      MergeFile testMergreFile = MergeFile.mergeFileForPath(testLocus);
+      MergeFile testMergeFile = MergeFile.mergeFileForPath(testLocus);
 
       boolean globalDidFail = false;
       for (int i = 0; i < numThreads; i++)
@@ -322,14 +368,14 @@ public class ConsistencyTest
         assert delimitedObject.size() > 1;
 
 
-        testMergreFile.appendToFileHelper(delimitedObject.get(0));
-        testMergreFile.nextPageRetNullOnError();
+        testMergeFile.appendToFileHelper(delimitedObject.get(0));
+        testMergeFile.nextPageRetNullOnError();
 
 
         // after writing the first page the metadata should say the object
         // is incomplete and have exactly one entry in the page list
         AtomicReference<MergeFile.PersistedObjectInfo> atomicObjectInfo =
-          testMergreFile.sequenceNumberToPageInfoList.get((long) i);
+          testMergeFile.sequenceNumberToPageInfoList.get((long) i);
 
         assert atomicObjectInfo != null;
 
@@ -343,15 +389,15 @@ public class ConsistencyTest
 
         for (int j = 1; j < delimitedObject.size(); j++)
         {
-          testMergreFile.appendToFileHelper(delimitedObject.get(j));
-          testMergreFile.nextPageRetNullOnError();
+          testMergeFile.appendToFileHelper(delimitedObject.get(j));
+          testMergeFile.nextPageRetNullOnError();
         }
 
         // after writing all pages for an object the metadata should say that the
         // object is complete and have all entries is the page list
 
         atomicObjectInfo =
-          testMergreFile.sequenceNumberToPageInfoList.get((long) i);
+          testMergeFile.sequenceNumberToPageInfoList.get((long) i);
 
         assert atomicObjectInfo != null;
 
@@ -387,7 +433,7 @@ public class ConsistencyTest
     @Test
     public void testReadWriteMetadataConsistency()
     {
-      byte[][] testArray = new byte[0x20][];
+      byte[][] testArray = new byte[numThreads][];
       // todo better source of entropy
       Random random = new Random();
 
@@ -397,12 +443,11 @@ public class ConsistencyTest
         random.nextBytes(testArray[i]);
       }
 
-      //noinspection unchecked
-      List<byte[]>[] delimitedPageLists = new List[testArray.length];
+      List<List<byte[]>> delimitedPageLists = new ArrayList<>(testArray.length);
 
       for (int i = 0; i < testArray.length; i++)
       {
-        delimitedPageLists[i] = MergeFile.delimitedObject(testArray[i], i);
+        delimitedPageLists.add(i, MergeFile.delimitedObject(testArray[i], i));
       }
 
       AtomicInteger threadNumberTracker = new AtomicInteger(0);
@@ -413,7 +458,7 @@ public class ConsistencyTest
         () ->
         {
           int threadNum = threadNumberTracker.getAndIncrement();
-          for (byte[] page : delimitedPageLists[threadNum])
+          for (byte[] page : delimitedPageLists.get(threadNum))
           {
             try
             {
@@ -430,6 +475,15 @@ public class ConsistencyTest
 
       threadNumberTracker.set(0);
 
+      final boolean[] readSucesses = new boolean[testArray.length];
+
+      // I seem to recall boolean arrays getting inited to false,
+      // but let's make sure
+      for (int i = 0; i < readSucesses.length; i++)
+      {
+        readSucesses[i] = false;
+      }
+
       // todo use readSuccesses here so we can assert false in the main thread
       startAndJoinThreads
       (
@@ -442,13 +496,33 @@ public class ConsistencyTest
             byte[] expected = testArray[threadNum];
             byte[] actual = MergeFile.mergeFileForPath(testLocus).getObject(threadNum);
 
+            if (expected == null || actual == null)
+            {
+              readSucesses[threadNum] = false;
+            }
+
+            if (expected ==  null)
+            {
+              System.out.println("Expected value was null, that's super weird");
+              Thread.dumpStack();
+              return;
+            }
+
+            if (actual == null)
+            {
+              System.out.println("actual value was null for "+ threadNum +", that's not good at all");
+              Thread.dumpStack();
+              return;
+            }
+
             int expectedLength = expected.length;
             int actualLength = actual.length;
 
             if (expectedLength != actualLength)
             {
-              System.out.println("length mismatch");
-              assert false;
+              System.out.println("length mismatch on " + threadNum);
+              readSucesses[threadNum] = false;
+              return;
             }
             if
             (
@@ -462,7 +536,7 @@ public class ConsistencyTest
             )
             {
               System.out.println("Got a mismatch for " + threadNum);
-              assert false;
+              readSucesses[threadNum] = false;
             }
           }
           catch (IOException e)
@@ -470,12 +544,25 @@ public class ConsistencyTest
             System.out.println("This is really not good");
             System.out.println("Got a mismatch with object number " + threadNum);
             e.printStackTrace();
-            assert false;
+            readSucesses[threadNum] = false;
           }
 
           System.out.println("threadNum " + threadNum + " got a match");
+          readSucesses[threadNum] = true;
         }
       );
+
+      boolean globalSuccess = true;
+      for (int i = 0; i < readSucesses.length; i++)
+      {
+        if (!readSucesses[i])
+        {
+          globalSuccess = false;
+          System.out.println("Read failed on " + i);
+        }
+      }
+
+      assert globalSuccess;
     }
 
     @Test

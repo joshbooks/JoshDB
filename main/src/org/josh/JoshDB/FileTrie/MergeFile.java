@@ -127,6 +127,15 @@ public class MergeFile
       return retVal;
   }
 
+  void closeAppender() throws IOException
+  {
+    Long localFd = fd.get();
+    if (localFd != null)
+    {
+      closeFile(localFd);
+    }
+  }
+
   // todo it seems like instantiation is pretty much just done to implement iterator
   // maybe that should be split into a different class??
   // todo we don't do iterating anymore, that changes some things
@@ -734,6 +743,16 @@ public class MergeFile
       }
 
       return existing;
+    }
+
+    void closeByteChannel() throws IOException
+    {
+      SeekableByteChannel existing = byteChannelForThread.get();
+
+      if (existing != null)
+      {
+        existing.close();
+      }
     }
 
     // this method is twice as stupid as nextPage as the type it returns must be null checked
