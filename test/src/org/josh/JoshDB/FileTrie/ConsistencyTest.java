@@ -450,6 +450,17 @@ public class ConsistencyTest
         delimitedPageLists.add(i, MergeFile.delimitedObject(testArray[i], i));
       }
 
+      for (int i = 0; i < delimitedPageLists.size(); i++)
+      {
+        assert
+          Arrays
+            .equals
+            (
+              testArray[i],
+              MergeFile.undelimitedObject(delimitedPageLists.get(i))
+            );
+      }
+
       AtomicInteger threadNumberTracker = new AtomicInteger(0);
 
       startAndJoinThreads
@@ -547,7 +558,6 @@ public class ConsistencyTest
             readSucesses[threadNum] = false;
           }
 
-          System.out.println("threadNum " + threadNum + " got a match");
           readSucesses[threadNum] = true;
         }
       );

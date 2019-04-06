@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class MergeFile
 {
-    static
+  private static org.slf4j.Logger log = LoggerFactory.getLogger(MergeFile.class.getName());
+
+  static
     {
       try
       {
@@ -34,6 +36,8 @@ public class MergeFile
         catch (UnsatisfiedLinkError ule)
         {
           System.out.println("Couldn't load native lib");
+          System.err.println("Couldn't load native lib");
+          log.error("Couldn't load native lib");
           System.exit(1);
         }
       }
@@ -143,7 +147,7 @@ public class MergeFile
           new NonBlockingHashMap<>();
 
   // So I think the ultimate idea is to have a thread pool doing all the IO
-  // so what we want is a worker thread function fed off someting like a queue
+  // so what we want is a worker thread function fed off something like a queue
   // (disruptor anyone?) and any thread may write to any file at any time
   // and come to think about it if we have one big disruptor for all the stages
   // of the databases (write ahead?, confirm write ahead by other nodes?,
@@ -151,7 +155,6 @@ public class MergeFile
   // this whole thing can be kept largely copy free
   // (after I optimize the crap out of the code in this file of course [sys/uio.h FTW!])
 
-  private static org.slf4j.Logger log = LoggerFactory.getLogger(MergeFile.class.getName());
 
   public static MergeFile mergeFileForPath(Path path)
   {
@@ -185,11 +188,11 @@ public class MergeFile
   }
 
 
-    private MergeFile(Path file)
-    {
-        this.file = file;
-        this.sequenceArray = sequenceArrayForPath(file);
-    }
+  private MergeFile(Path file)
+  {
+    this.file = file;
+    this.sequenceArray = sequenceArrayForPath(file);
+  }
 
     static class PersistedObjectInfo
     {
@@ -216,7 +219,7 @@ public class MergeFile
           return false;
         }
 
-        // The one and not only
+        // The one
         if (pageInfoArr.length == 1)
         {
           // and only
@@ -282,6 +285,7 @@ public class MergeFile
       }
     }
 
+    // TODO the logic for this is super boneheaded, make better
     byte[] getObject(long sequenceNumber) throws IOException
     {
       AtomicReference<PersistedObjectInfo> atomicObjectInfo =
@@ -295,7 +299,12 @@ public class MergeFile
 
       List<byte[]> delimitedPages = new ArrayList<>();
 
-      for (PageInfo.BasicPageInfo pageInfo : (objectInfo == null ? new PageInfo.BasicPageInfo[]{} : objectInfo.pageInfoArr))
+      PageInfo.BasicPageInfo[] localPageInfoArr =
+        objectInfo == null
+          ? new PageInfo.BasicPageInfo[]{}
+          : objectInfo.pageInfoArr;
+
+      for (PageInfo.BasicPageInfo pageInfo : localPageInfoArr)
       {
         getByteChannel().position(pageInfo.offset);
 
@@ -306,7 +315,7 @@ public class MergeFile
           throw new IOException("Something really dreadful has occurred, please check yourself before you corrupt yourself further");
         }
 
-        delimitedPages.add(nextPage());
+        delimitedPages.add(nextPage);
       }
 
       atomicObjectInfo =
@@ -316,7 +325,14 @@ public class MergeFile
           ? null
           : atomicObjectInfo.get();
 
-      while (objectInfo == null || !objectInfo.isPageArrComplete())
+      while
+      (
+        objectInfo == null
+        ||
+        !objectInfo.isPageArrComplete()
+        ||
+        delimitedPages.size() != objectInfo.pageInfoArr.length
+      )
       {
         byte[] nextPage = nextPageRetNullOnError();
 
@@ -327,6 +343,7 @@ public class MergeFile
 
         if (sequenceNumberOfPage(nextPage) == sequenceNumber)
         {
+
           delimitedPages.add(nextPage);
         }
 
