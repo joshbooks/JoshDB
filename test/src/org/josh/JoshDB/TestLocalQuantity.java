@@ -1,6 +1,6 @@
 package org.josh.JoshDB;
 
-import org.testng.annotations.Test;
+import org.junit.Test;
 
 import java.util.Random;
 

@@ -152,8 +152,6 @@ public class ConsistencyTest
 
             byte valueForArray = testBuffer[0];
 
-          System.out.println("value for array was " + valueForArray);
-
             boolean allCorrect = true;
 
             for (int j = 0; j < MergeFile.PIPE_BUF; j++)
