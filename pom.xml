@@ -43,7 +43,7 @@
                         <configuration>
                             <executable>mv</executable>
                             <arguments>
-                                <argument>target/classes/jniUtilLib.solib</argument>
+                                <argument>${basedir}/jniUtilLib.solib</argument>
                                 <argument>resources/</argument>
                             </arguments>
                         </configuration>
