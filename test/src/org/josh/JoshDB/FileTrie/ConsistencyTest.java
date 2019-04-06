@@ -439,7 +439,7 @@ public class ConsistencyTest
 
       for (int i = 0; i < testArray.length; i++)
       {
-        testArray[i] = new byte[random.nextInt(0x69)];
+        testArray[i] = new byte[random.nextInt(0x10000)];
         random.nextBytes(testArray[i]);
       }
 
