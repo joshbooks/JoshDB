@@ -1,5 +1,6 @@
 package org.josh.JoshDB.FileTrie;
 
+import net.jcip.annotations.NotThreadSafe;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -13,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
+@NotThreadSafe
 public class ConsistencyTest
 {
     private static final Path testLocus = Paths.get("./consistencyTestFile");

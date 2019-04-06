@@ -73,6 +73,15 @@
                 </configuration>
                 <version>3.7.0</version>
             </plugin>
+            <!-- JUnit 5 requires Surefire version 2.22.0 or higher -->
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.22.0</version>
+                <configuration>
+                    <threadCount>1</threadCount>
+                    <forkCount>4</forkCount>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
     <packaging>jar</packaging>
@@ -112,16 +121,16 @@
             <version>1.0.0</version>
         </dependency>
         <!-- testing dependencies -->
-        <!--<dependency>-->
-            <!--<groupId>org.testng</groupId>-->
-            <!--<artifactId>testng</artifactId>-->
-            <!--<version>6.8</version>-->
-            <!--<scope>test</scope>-->
-        <!--</dependency>-->
         <dependency>
-            <groupId>org.junit</groupId>
-            <artifactId>surefire-junit5</artifactId>
-            <version>5.0.0-ALPHA</version>
+            <groupId>com.github.stephenc.jcip</groupId>
+            <artifactId>jcip-annotations</artifactId>
+            <version>1.0-1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.10</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
