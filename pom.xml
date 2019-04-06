@@ -79,6 +79,7 @@
                 <version>2.22.0</version>
                 <configuration>
                     <threadCount>1</threadCount>
+                    <forkCount>4</forkCount>
                 </configuration>
             </plugin>
         </plugins>

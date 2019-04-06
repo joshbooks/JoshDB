@@ -25,7 +25,7 @@ public class MergeFile
     {
       try
       {
-        NativeUtils.loadLibraryFromJar("/resources/jniUtilLib.solib");
+        NativeUtils.loadLibraryFromJar("/jniUtilLib.solib");
       }
       catch (IOException e)
       {
