@@ -285,7 +285,6 @@ public class MergeFile
       }
     }
 
-    // TODO the logic for this is super boneheaded, make better
     byte[] getObject(long sequenceNumber) throws IOException
     {
       AtomicReference<PersistedObjectInfo> atomicObjectInfo =
@@ -298,65 +297,65 @@ public class MergeFile
       int pageNumber = 0;
 
       List<byte[]> delimitedPages = new ArrayList<>();
+      SeekableByteChannel channel = getByteChannel();
 
-      PageInfo.BasicPageInfo[] localPageInfoArr =
-        objectInfo == null
-          ? new PageInfo.BasicPageInfo[]{}
-          : objectInfo.pageInfoArr;
+      // TODO we should be able to maintain a variable that tells us where
+      // the unknown blocks start (best effort is fine since it's monotonically
+      // increasing and redoing work isn't a huge deal), then we posistion to the minimum
+      // of that and the first block we're aware of for this object. That way we don't have
+      // to start over at 0 every time
+      channel.position(0);
 
-      for (PageInfo.BasicPageInfo pageInfo : localPageInfoArr)
+      while (true)
       {
-        getByteChannel().position(pageInfo.offset);
-
-        byte[] nextPage = nextPageRetNullOnError();
-
-        if (nextPage == null)
+        if (objectInfo != null)
         {
-          throw new IOException("Something really dreadful has occurred, please check yourself before you corrupt yourself further");
+          while (pageNumber < objectInfo.pageInfoArr.length)
+          {
+            channel.position(objectInfo.pageInfoArr[pageNumber].offset);
+            delimitedPages.add(nextPage());
+            pageNumber++;
+          }
+
+          objectInfo = atomicObjectInfo.get();
         }
 
-        delimitedPages.add(nextPage);
-      }
-
-      atomicObjectInfo =
-        sequenceNumberToPageInfoList.get(sequenceNumber);
-      objectInfo =
-        atomicObjectInfo == null
-          ? null
-          : atomicObjectInfo.get();
-
-      while
-      (
-        objectInfo == null
-        ||
-        !objectInfo.isPageArrComplete()
-        ||
-        delimitedPages.size() != objectInfo.pageInfoArr.length
-      )
-      {
-        byte[] nextPage = nextPageRetNullOnError();
-
-        if (nextPage == null)
+        if (objectInfo == null || !objectInfo.isPageArrComplete())
         {
-          throw new IOException("Something really dreadful has occurred, please check yourself before you corrupt yourself further");
+          byte[] delimitedPage = nextPage();
+
+          if (sequenceNumberOfPage(delimitedPage) == sequenceNumber)
+          {
+            delimitedPages.add(delimitedPage);
+            pageNumber++;
+          }
+
+          if (atomicObjectInfo == null)
+          {
+            atomicObjectInfo = sequenceNumberToPageInfoList.get(sequenceNumber);
+          }
+
+          objectInfo =
+            atomicObjectInfo == null
+              ? null
+              : atomicObjectInfo.get();
         }
 
-        if (sequenceNumberOfPage(nextPage) == sequenceNumber)
+        if (objectInfo != null)
         {
-
-          delimitedPages.add(nextPage);
+          if (objectInfo.isPageArrComplete())
+          {
+            if (delimitedPages.size() == objectInfo.pageInfoArr.length)
+            {
+              break;
+            }
+          }
         }
-
-        atomicObjectInfo =
-          sequenceNumberToPageInfoList.get(sequenceNumber);
-        objectInfo =
-          atomicObjectInfo == null
-            ? null
-            : atomicObjectInfo.get();
       }
 
       return undelimitedObject(delimitedPages);
     }
+
 
     NonBlockingHashMap
     <
