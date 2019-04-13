@@ -495,7 +495,6 @@ public class ConsistencyTest
         readSucesses[i] = false;
       }
 
-      // todo use readSuccesses here so we can assert false in the main thread
       startAndJoinThreads
       (
         testArray.length,
@@ -505,7 +504,8 @@ public class ConsistencyTest
           try
           {
             byte[] expected = testArray[threadNum];
-            byte[] actual = MergeFile.mergeFileForPath(testLocus).getObject(threadNum);
+            byte[] actual =
+              MergeFile.mergeFileForPath(testLocus).getObject(threadNum);
 
             if (expected == null || actual == null)
             {
@@ -574,6 +574,152 @@ public class ConsistencyTest
 
       assert globalSuccess;
     }
+
+  @Test
+  public void testReadBackwardWriteForwardMetadataConsistency()
+  {
+    byte[][] testArray = new byte[numThreads][];
+    // todo better source of entropy
+    Random random = new Random();
+
+    for (int i = 0; i < testArray.length; i++)
+    {
+      testArray[i] = new byte[random.nextInt(0x10000)];
+      random.nextBytes(testArray[i]);
+    }
+
+    List<List<byte[]>> delimitedPageLists = new ArrayList<>(testArray.length);
+
+    for (int i = 0; i < testArray.length; i++)
+    {
+      delimitedPageLists.add(i, MergeFile.delimitedObject(testArray[i], i));
+    }
+
+    for (int i = 0; i < delimitedPageLists.size(); i++)
+    {
+      assert
+        Arrays
+          .equals
+          (
+            testArray[i],
+            MergeFile.undelimitedObject(delimitedPageLists.get(i))
+          );
+    }
+
+    AtomicInteger threadNumberTracker = new AtomicInteger(0);
+
+    startAndJoinThreads
+    (
+      testArray.length,
+      () ->
+      {
+        int threadNum = threadNumberTracker.getAndIncrement();
+        for (byte[] page : delimitedPageLists.get(threadNum))
+        {
+          try
+          {
+            MergeFile.mergeFileForPath(testLocus).appendToFileHelper(page);
+          }
+          catch (IOException e)
+          {
+            e.printStackTrace();
+            assert false;
+          }
+        }
+      }
+    );
+
+    threadNumberTracker.set(testArray.length);
+
+    final boolean[] readSucesses = new boolean[testArray.length];
+
+    // I seem to recall boolean arrays getting inited to false,
+    // but let's make sure
+    for (int i = 0; i < readSucesses.length; i++)
+    {
+      readSucesses[i] = false;
+    }
+
+    // todo use readSuccesses here so we can assert false in the main thread
+    startAndJoinThreads
+    (
+      testArray.length,
+      () ->
+      {
+        int threadNum = threadNumberTracker.decrementAndGet();
+        try
+        {
+          byte[] expected = testArray[threadNum];
+          byte[] actual =
+            MergeFile.mergeFileForPath(testLocus).getObject(threadNum);
+
+          if (expected == null || actual == null)
+          {
+            readSucesses[threadNum] = false;
+          }
+
+          if (expected ==  null)
+          {
+            System.out.println("Expected value was null, that's super weird");
+            Thread.dumpStack();
+            return;
+          }
+
+          if (actual == null)
+          {
+            System.out.println("actual value was null for "+ threadNum +", that's not good at all");
+            Thread.dumpStack();
+            return;
+          }
+
+          int expectedLength = expected.length;
+          int actualLength = actual.length;
+
+          if (expectedLength != actualLength)
+          {
+            System.out.println("length mismatch on " + threadNum);
+            readSucesses[threadNum] = false;
+            return;
+          }
+          if
+          (
+            !
+            Arrays
+              .equals
+              (
+                testArray[threadNum],
+                actual
+              )
+          )
+          {
+            System.out.println("Got a mismatch for " + threadNum);
+            readSucesses[threadNum] = false;
+          }
+        }
+        catch (IOException e)
+        {
+          System.out.println("This is really not good");
+          System.out.println("Got a mismatch with object number " + threadNum);
+          e.printStackTrace();
+          readSucesses[threadNum] = false;
+        }
+
+        readSucesses[threadNum] = true;
+      }
+    );
+
+    boolean globalSuccess = true;
+    for (int i = 0; i < readSucesses.length; i++)
+    {
+      if (!readSucesses[i])
+      {
+        globalSuccess = false;
+        System.out.println("Read failed on " + i);
+      }
+    }
+
+    assert globalSuccess;
+  }
 
     @Test
     public void testSequenceNumberParsing()
