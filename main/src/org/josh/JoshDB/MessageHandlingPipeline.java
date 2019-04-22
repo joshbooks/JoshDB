@@ -25,41 +25,45 @@ public class MessageHandlingPipeline
 
     private int bufferSize = 1024;
 
-    //I'mnot sure MessageAndCodeBundle is the right abstraction here
+    //I'm not sure MessageAndCodeBundle is the right abstraction here
     private final Disruptor<MessageAndCodeBundle> disruptor;
 
 
     public MessageHandlingPipeline()
     {
         disruptor =
-                new Disruptor<>
-                        (
-                                MessageAndCodeBundle::new,
-                                bufferSize,
-                                disruptorThreadFactory
-                        );
+          new Disruptor<>
+          (
+            MessageAndCodeBundle::new,
+            bufferSize,
+            disruptorThreadFactory
+          );
 
-        disruptor.handleEventsWith((EventHandler<MessageAndCodeBundle>) (event, sequence, endOfBatch) ->
-        {
-            return;
-        });
+      //noinspection unchecked
+      disruptor
+          .handleEventsWith
+          (
+            (EventHandler<MessageAndCodeBundle>) (event, sequence, endOfBatch) ->
+            {
+                return;
+            }
+          );
         //noinspection unchecked
         disruptor
-                .handleEventsWith
-                        (
-                                (MessageAndCodeBundle bundle, long l, boolean b) ->
-                                {
-                                }
-                        )
-                .then
-                        (
-                                (MessageAndCodeBundle bundle, long l, boolean b) ->
-                                {
-                                }
-                        );
+          .handleEventsWith
+          (
+            (MessageAndCodeBundle bundle, long l, boolean b) ->
+            {
+            }
+          )
+          .then
+          (
+            (MessageAndCodeBundle bundle, long l, boolean b) ->
+            {
+            }
+          );
 
         disruptor.start();
         ringBuffer = disruptor.getRingBuffer();
     }
-
 }

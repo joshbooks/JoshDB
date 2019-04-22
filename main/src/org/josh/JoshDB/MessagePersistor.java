@@ -50,8 +50,8 @@ public class MessagePersistor {
     private final Disruptor<MessageAndCodeBundle> disruptor;
 
     public MessagePersistor(Path persistDestination) throws IOException {
-        //todo this is no bueno, dealing with flushing and shit is going to be a
-        //huge problem and I don't like it. I don't like it at all. But I have to
+        // todo this is no bueno, dealing with flushing and shit is going to be a
+        // huge problem and I don't like it. I don't like it at all. But I have to
         // deal with it somehow
         logFileWriter = ArcCloseable.arcWriterForFile(persistDestination);
         logFileWriter.incRef();
@@ -63,7 +63,8 @@ public class MessagePersistor {
                 MessageAndCodeBundle::new,
                 bufferSize,
                 disruptorThreadFactory
-            );
+            )
+        ;
 
         //noinspection unchecked
         disruptor
@@ -106,11 +107,16 @@ public class MessagePersistor {
 
     public void persistMessage(MessageAndCodeBundle bundle)
     {
-        ringBuffer.publishEvent((event, sequence) ->
-        {
-            event.code = bundle.code;
-            event.msg = bundle.msg;
-        });
+        ringBuffer
+            .publishEvent
+            (
+                (event, sequence) ->
+                {
+                    event.code = bundle.code;
+                    event.msg = bundle.msg;
+                }
+            )
+        ;
     }
 
     public void shutDown() throws IOException

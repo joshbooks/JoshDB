@@ -21,12 +21,12 @@ public class RemoteNode {
 
     public void sendMessage(Message msg)
     {
-        //todo this is not so great. The org.josh.JoshDB.RemoteNode should store the type of
-        //connection this org.josh.JoshDB.Node has to the org.josh.JoshDB.RemoteNode and call the appropriate
+        // todo this is not so great. The org.josh.JoshDB.RemoteNode should store the type of
+        // connection this org.josh.JoshDB.Node has to the org.josh.JoshDB.RemoteNode and call the appropriate
         // function to send the message over that type of connection. but for
-        // now since we're going to be testing this all on one achine, we'll
+        // now since we're going to be testing this all on one machine, we'll
         // just assume that all nodes are connected by being run on the same JVM
-        //and registering with some hackyBullshit to make this work for now
+        // and registering with some hackyBullshit to make this work for now
 
         hackyBullshit.get(id).onReceiveRequest(msg);
     }

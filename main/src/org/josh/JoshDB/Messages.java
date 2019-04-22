@@ -18,7 +18,8 @@ public class Messages {
             (
                 of.receiptChain,
                 Receipt.checkPlease(thisNode)
-            );
+            )
+        ;
 
         return copy;
     }
@@ -71,7 +72,8 @@ public class Messages {
             (
                 msg.receiptChain,
                 Receipt.checkPlease(thisNode)
-            );
+            )
+        ;
         ack.data = msg.messageId;
 
         return ack;

@@ -148,8 +148,8 @@ public class FunctionalZookeeperClient implements Closeable, Watcher
         properties.setProperty("clientPort", Integer.toString(clientPort));
 
 
-        //ok, so the key is "server.[sid]"
-        //and then the value (we're going to ignore what to do
+        // ok, so the key is "server.[sid]"
+        // and then the value (we're going to ignore what to do
         // if you're including an ipv6 hostname) is "[hostname]:[port](:[electionPort])?
         // and for now we're going to ignore the trailing bit that lets you specify
         // the peerType because for now everyone's going to be a participant
@@ -326,8 +326,6 @@ public class FunctionalZookeeperClient implements Closeable, Watcher
 
         return longValue;
     }
-
-
 
     public CompletableFuture<Long> setLong(String path, Long value)
     {

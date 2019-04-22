@@ -3,9 +3,8 @@ package org.josh.JoshDB;
 import java.util.List;
 import java.util.UUID;
 
-
-
-public class Message {
+public class Message
+{
     public enum MessageType
     {
         //ANNOUNCE,
@@ -18,7 +17,7 @@ public class Message {
     public UUID messageId;
 
     public long sentAt;
-    //this will become the certificate of the org.josh.JoshDB.Node
+    // this will become the certificate of the org.josh.JoshDB.Node
     public UUID sentByNodeId;
 
     public List<Receipt> receiptChain; //will be blank when first sending

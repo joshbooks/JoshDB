@@ -285,6 +285,7 @@ public class MergeFile
       }
     }
 
+
     byte[] getObject(long sequenceNumber) throws IOException
     {
       AtomicReference<PersistedObjectInfo> atomicObjectInfo =

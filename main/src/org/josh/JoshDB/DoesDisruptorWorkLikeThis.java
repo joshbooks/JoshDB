@@ -18,47 +18,65 @@ public class DoesDisruptorWorkLikeThis
             (runnable) ->
             {
                 Thread disruptorThread = new Thread(runnable);
+                disruptorThread.setDaemon(true);
                 disruptorThreads.add(disruptorThread);
                 return disruptorThread;
             };
 
     static int bufferSize = 1024;
 
-    //I'mnot sure MessageAndCodeBundle is the right abstraction here
+    //I'm not sure MessageAndCodeBundle is the right abstraction here
     static Disruptor<StringBuilder> disruptor;
 
     public static void main(String[] args)
     {
         disruptor =
-                new Disruptor<>
-                        (
-                                StringBuilder::new,
-                                bufferSize,
-                                disruptorThreadFactory
-                        );
+            new Disruptor<>
+            (
+                StringBuilder::new,
+                bufferSize,
+                disruptorThreadFactory
+            );
 
-        disruptor.handleEventsWith((event, sequence, endOfBatch) ->
-        {
-            System.out.println("First stage: "+event.toString());
-            event.append(" hi");
-        })
-        .then((event, sequence, endOfBatch) ->
+        //noinspection unchecked
+        disruptor
+            .handleEventsWith
+            (
+                (event, sequence, endOfBatch) ->
+                {
+                    System.out.println("First stage: "+event.toString());
+                    event.append(" hi");
+                }
+            )
+            .then
+            (
+                (event, sequence, endOfBatch) ->
                 {
                     System.out.println("Second stage: "+event.toString());
                 }
-        ).then((event, sequence, endOfBatch) -> event = null);
-
+            )
+            .then
+            (
+                (event, sequence, endOfBatch) ->
+                event = null
+            );
 
         disruptor.start();
         ringBuffer = disruptor.getRingBuffer();
 
-        ringBuffer.publishEvent(((event, sequence) ->
-                                 {
-                                     event.append("hello");
+        ringBuffer
+            .publishEvent
+            (
+                (event, sequence) ->
+                {
+                    event.append("hello");
+                }
+            );
 
-        }));
         //TODO aw shit, this changes everything, I think I know how to do
         // MessageHandlingPipeline and I think MessageAndCodeBundle will
         // still work
+
+        disruptor.shutdown();
     }
 }
