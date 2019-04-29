@@ -607,8 +607,9 @@ public class ConsistencyTest
 
     for (int i = 0; i < delimitedPageLists.size(); i++)
     {
+      byte[] undelimited = MergeFile.undelimitedObject(delimitedPageLists.get(i));
       int testLength = testArray[i].length;
-      assert delimitedPageLists.get(i).size() == testLength;
+      assert undelimited.length == testLength;
 
       assert
         Arrays
