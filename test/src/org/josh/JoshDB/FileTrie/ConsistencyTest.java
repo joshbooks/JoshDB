@@ -450,8 +450,18 @@ public class ConsistencyTest
         delimitedPageLists.add(i, MergeFile.delimitedObject(testArray[i], i));
       }
 
+
       for (int i = 0; i < delimitedPageLists.size(); i++)
       {
+        int sizeOfData =
+          MergeFile
+            .amountRemainingForPage
+            (
+              delimitedPageLists.get(i).get(0)
+            );
+
+        assert sizeOfData == testArray[i].length;
+
         assert
           Arrays
             .equals
