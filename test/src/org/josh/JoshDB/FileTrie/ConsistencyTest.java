@@ -607,6 +607,9 @@ public class ConsistencyTest
 
     for (int i = 0; i < delimitedPageLists.size(); i++)
     {
+      int testLength = testArray[i].length;
+      assert delimitedPageLists.get(i).size() == i;
+
       assert
         Arrays
           .equals
