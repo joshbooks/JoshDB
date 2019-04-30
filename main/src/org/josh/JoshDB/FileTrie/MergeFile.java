@@ -1,6 +1,7 @@
 package org.josh.JoshDB.FileTrie;
 
 import cz.adamh.utils.NativeUtils;
+import org.cliffc.high_scale_lib.Counter;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +97,8 @@ public class MergeFile
   private final AtomicResizingLongArray sequenceArray;
   private ThreadLocal<Long> fd = new ThreadLocal<>();
 
+  private final Counter byteChannelPosition = new Counter();
+
   private static native long openFile(String filePath);
 
   // todo this should be a Closeable so we can use the nice ArcWrapper we wrote
@@ -154,7 +157,6 @@ public class MergeFile
   // perform update in memory?, tell other nodes what the result is?, return result?),
   // this whole thing can be kept largely copy free
   // (after I optimize the crap out of the code in this file of course [sys/uio.h FTW!])
-
 
   public static MergeFile mergeFileForPath(Path path)
   {
@@ -300,12 +302,7 @@ public class MergeFile
       List<byte[]> delimitedPages = new ArrayList<>();
       SeekableByteChannel channel = getByteChannel();
 
-      // TODO we should be able to maintain a variable that tells us where
-      // the unknown blocks start (best effort is fine since it's monotonically
-      // increasing and redoing work isn't a huge deal), then we posistion to the minimum
-      // of that and the first block we're aware of for this object. That way we don't have
-      // to start over at 0 every time
-      channel.position(0);
+      channel.position(byteChannelPosition.estimate_get());
 
       while (true)
       {
@@ -823,7 +820,9 @@ public class MergeFile
 
       // might want to move some error handling in here
       // to get better assurances about validity of page info
-      addPageInfo(buffer, pageOffset);
+      if (addPageInfo(buffer, pageOffset)) {
+        byteChannelPosition.add(PIPE_BUF);
+      }
 
       return retVal;
     }
