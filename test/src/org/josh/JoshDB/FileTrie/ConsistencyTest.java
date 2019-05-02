@@ -439,7 +439,7 @@ public class ConsistencyTest
 
       for (int i = 0; i < testArray.length; i++)
       {
-        testArray[i] = new byte[random.nextInt(0x10000)];
+        testArray[i] = new byte[0x10000];
         random.nextBytes(testArray[i]);
       }
 
@@ -504,6 +504,8 @@ public class ConsistencyTest
       {
         readSucesses[i] = false;
       }
+
+      long startTime = System.nanoTime();
 
       startAndJoinThreads
       (
@@ -571,6 +573,22 @@ public class ConsistencyTest
           readSucesses[threadNum] = true;
         }
       );
+
+      long endTime = System.nanoTime();
+
+      System
+        .out
+        .println
+        (
+          "It took "
+          + (endTime - startTime)
+          + " nanoseconds"
+          + " to read "
+          + testArray.length
+          + " objects, each "
+          + testArray[0].length
+          + " bytes long"
+        );
 
       boolean globalSuccess = true;
       for (int i = 0; i < readSucesses.length; i++)
