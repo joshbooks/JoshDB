@@ -139,7 +139,18 @@ public class TestDisruptorAtopMergeFile
 
     TestThreadFactory()
     {
-      this(Executors.defaultThreadFactory());
+      this
+      (
+        r
+        ->
+        {
+          Thread thread = Executors.defaultThreadFactory().newThread(r);
+
+          thread.setPriority(Thread.MAX_PRIORITY);
+
+          return thread;
+        }
+      );
     }
 
     @Override
@@ -179,30 +190,30 @@ public class TestDisruptorAtopMergeFile
 
     return disruptor;
   }
-
-  @Test
-  public void testSingleDisruptorWrites()
-  {
-    testDisruptorWrites(1, 2048);
-  }
-
-  @Test
-  public void testFourDisruptorWrites()
-  {
-    testDisruptorWrites(4, 512);
-  }
+//
+//  @Test
+//  public void testSingleDisruptorWrites()
+//  {
+//    testDisruptorWrites(1, 2048);
+//  }
+//
+//  @Test
+//  public void testFourDisruptorWrites()
+//  {
+//    testDisruptorWrites(4, 512);
+//  }
 
   @Test
   public void testEightDisruptorWrites()
   {
     testDisruptorWrites(8, 256);
   }
-
-  @Test
-  public void testSixteenDisruptorWrites()
-  {
-    testDisruptorWrites(16, 128);
-  }
+//
+//  @Test
+//  public void testSixteenDisruptorWrites()
+//  {
+//    testDisruptorWrites(16, 128);
+//  }
 
   @Test
   public void testThirtyTwoDisruptorWrites()
@@ -236,6 +247,8 @@ public class TestDisruptorAtopMergeFile
       disruptors.add(setupDisruptor());
     }
 
+    final AtomicInteger doneCount = new AtomicInteger(0);
+
     Thread[] threads = new Thread[numThreads];
 
     for (int i = 0; i < numThreads; i++)
@@ -268,6 +281,8 @@ public class TestDisruptorAtopMergeFile
                 ;
               }
             }
+
+            doneCount.incrementAndGet();
           }
         )
       ;

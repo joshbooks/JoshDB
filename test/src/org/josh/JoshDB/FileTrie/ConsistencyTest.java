@@ -679,16 +679,21 @@ public class ConsistencyTest
       () ->
       {
         int threadNum = threadNumberTracker.decrementAndGet();
+
+        // guilty until proven innocent
+        readSucesses[threadNum] = false;
+
         try
         {
           byte[] expected = testArray[threadNum];
           byte[] actual =
             MergeFile.mergeFileForPath(testLocus).getObject(threadNum);
 
-          if (expected == null || actual == null)
-          {
-            readSucesses[threadNum] = false;
-          }
+          //
+//          if (expected == null || actual == null)
+//          {
+//            readSucesses[threadNum] = false;
+//          }
 
           if (expected ==  null)
           {
@@ -710,7 +715,7 @@ public class ConsistencyTest
           if (expectedLength != actualLength)
           {
             System.out.println("length mismatch on " + threadNum);
-            readSucesses[threadNum] = false;
+//            readSucesses[threadNum] = false;
             return;
           }
           if
@@ -725,7 +730,11 @@ public class ConsistencyTest
           )
           {
             System.out.println("Got a mismatch for " + threadNum);
-            readSucesses[threadNum] = false;
+//            readSucesses[threadNum] = false;
+          }
+          else
+          {
+            readSucesses[threadNum] = true;
           }
         }
         catch (IOException e)
@@ -733,10 +742,8 @@ public class ConsistencyTest
           System.out.println("This is really not good");
           System.out.println("Got a mismatch with object number " + threadNum);
           e.printStackTrace();
-          readSucesses[threadNum] = false;
+//          readSucesses[threadNum] = false;
         }
-
-        readSucesses[threadNum] = true;
       }
     );
 
